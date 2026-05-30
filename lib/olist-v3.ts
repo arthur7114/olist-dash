@@ -158,12 +158,7 @@ async function tokenRequest(params: Record<string, string>) {
 }
 
 export async function fetchTinyOrders(accessToken: string): Promise<Pedido[]> {
-  const list = await tinyFetch<TinyListResponse<TinyOrderListItem>>(
-    accessToken,
-    "/pedidos?limit=100&offset=0&orderBy=desc",
-  )
-
-  const items = list.itens ?? []
+  const items = await fetchRecentOrderList(accessToken)
   const details = await mapWithConcurrency(items, 8, async (item) => {
     if (!item.id) return null
     try {
@@ -196,8 +191,37 @@ export async function fetchTinyOrders(accessToken: string): Promise<Pedido[]> {
 
   return details
     .filter((order): order is TinyOrderDetail => Boolean(order))
-    .flatMap((order) => mapOrderToPedidos(order, productCostMap))
+    .map((order) => mapOrderToPedido(order, productCostMap))
     .sort((a, b) => (a.data < b.data ? 1 : -1))
+}
+
+async function fetchRecentOrderList(accessToken: string) {
+  const { dataInicial, dataFinal } = getDefaultOrderDateRange()
+  const items: TinyOrderListItem[] = []
+  const limit = 100
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+
+  while (offset < total && items.length < 1000) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      orderBy: "desc",
+      dataInicial,
+      dataFinal,
+    })
+    const list = await tinyFetch<TinyListResponse<TinyOrderListItem>>(
+      accessToken,
+      `/pedidos?${params.toString()}`,
+    )
+    const pageItems = list.itens ?? []
+    items.push(...pageItems)
+    total = list.paginacao?.total ?? items.length
+    if (pageItems.length < limit) break
+    offset += limit
+  }
+
+  return items
 }
 
 async function tinyFetch<T>(accessToken: string, path: string): Promise<T> {
@@ -235,42 +259,40 @@ function itemToMinimalDetail(item: TinyOrderListItem): TinyOrderDetail {
   }
 }
 
-function mapOrderToPedidos(order: TinyOrderDetail, productCostMap: Map<number, number>): Pedido[] {
+function mapOrderToPedido(order: TinyOrderDetail, productCostMap: Map<number, number>): Pedido {
   const itens = order.itens?.length ? order.itens : itemToMinimalDetail(order).itens ?? []
   const totalItens = itens.reduce(
     (sum, item) => sum + toNumber(item.valorUnitario) * Math.max(1, toNumber(item.quantidade)),
     0,
   )
-  const freteTotal = toNumber(order.valorFrete)
-  const descontoTotal = toNumber(order.valorDesconto)
+  const primeiroItem = itens[0]
   const pedidoId = String(order.id ?? order.numeroPedido ?? crypto.randomUUID())
-
-  return itens.map((item, index) => {
-    const quantidade = Math.max(1, toNumber(item.quantidade))
-    const valorBrutoItem = toNumber(item.valorUnitario) * quantidade
-    const proporcao = totalItens ? valorBrutoItem / totalItens : 1 / itens.length
+  const valorVenda = toNumber(order.valorTotalPedido) || toNumber(order.valor) || totalItens
+  const custoTotal = itens.reduce((sum, item) => {
     const produtoId = item.produto?.id
     const custoMedio = produtoId ? productCostMap.get(produtoId) ?? 0 : 0
-    const devolucao = order.situacao === 2 ? valorBrutoItem : 0
+    return sum + custoMedio * Math.max(1, toNumber(item.quantidade))
+  }, 0)
+  const devolucao = order.situacao === 2 ? valorVenda : 0
+  const sufixoProduto = itens.length > 1 ? ` + ${itens.length - 1} item(ns)` : ""
 
-    return {
-      id: `${pedidoId}-${index}`,
-      numeroPedido: String(order.numeroPedido ?? order.id ?? ""),
-      numeroNF: order.idNotaFiscal ? String(order.idNotaFiscal) : "-",
-      sku: item.produto?.sku || String(item.produto?.id ?? "sem-sku"),
-      produto: item.produto?.descricao || `Item ${index + 1}`,
-      canal: getCanal(order),
-      vendedor: order.vendedor?.nome || "Sem vendedor",
-      formaPagamento: getFormaPagamento(order),
-      valorVenda: roundMoney(Math.max(0, valorBrutoItem - descontoTotal * proporcao)),
-      valorFrete: roundMoney(freteTotal * proporcao),
-      devolucao: roundMoney(devolucao),
-      taxaComissao: 0,
-      custoTotal: roundMoney(custoMedio * quantidade),
-      statusPagamento: getStatusPagamento(order),
-      data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
-    }
-  })
+  return {
+    id: pedidoId,
+    numeroPedido: String(order.numeroPedido ?? order.id ?? ""),
+    numeroNF: order.idNotaFiscal ? String(order.idNotaFiscal) : "-",
+    sku: primeiroItem?.produto?.sku || String(primeiroItem?.produto?.id ?? "sem-sku"),
+    produto: `${primeiroItem?.produto?.descricao || "Pedido sem item"}${sufixoProduto}`,
+    canal: getCanal(order),
+    vendedor: order.vendedor?.nome || "Sem vendedor",
+    formaPagamento: getFormaPagamento(order),
+    valorVenda: roundMoney(valorVenda),
+    valorFrete: roundMoney(toNumber(order.valorFrete)),
+    devolucao: roundMoney(devolucao),
+    taxaComissao: 0,
+    custoTotal: roundMoney(custoTotal),
+    statusPagamento: getStatusPagamento(order),
+    data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
+  }
 }
 
 function getCanal(order: TinyOrderDetail) {
@@ -309,9 +331,28 @@ function normalizeDate(value: string | undefined) {
 function toNumber(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0
   if (typeof value !== "string") return 0
-  const normalized = value.replace(/\./g, "").replace(",", ".")
+  const trimmed = value.trim()
+  const normalized =
+    trimmed.includes(",") && trimmed.includes(".")
+      ? trimmed.replace(/\./g, "").replace(",", ".")
+      : trimmed.replace(",", ".")
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function getDefaultOrderDateRange() {
+  const final = new Date()
+  const inicial = new Date(final)
+  inicial.setDate(final.getDate() - 30)
+
+  return {
+    dataInicial: formatDateParam(inicial),
+    dataFinal: formatDateParam(final),
+  }
+}
+
+function formatDateParam(date: Date) {
+  return date.toISOString().slice(0, 10)
 }
 
 function roundMoney(value: number) {
