@@ -291,21 +291,31 @@ async function fetchRecentOrderList(accessToken: string, period: OrderPeriod) {
   return items.slice(0, maxItems)
 }
 
-async function tinyFetch<T>(accessToken: string, path: string): Promise<T> {
-  const response = await fetch(`${OLIST_API_URL}${path}`, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    cache: "no-store",
-  })
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-  if (!response.ok) {
-    const body = await response.text()
-    throw new TinyApiError(`Olist ERP API v3 ${path} retornou ${response.status}: ${body}`, response.status)
+async function tinyFetch<T>(accessToken: string, path: string, maxRetries = 3): Promise<T> {
+  let attempt = 0
+  while (true) {
+    attempt++
+    const response = await fetch(`${OLIST_API_URL}${path}`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      if (response.status === 429 && attempt < maxRetries) {
+        await delay(attempt * 2000) // Backoff de 2s, 4s, etc.
+        continue
+      }
+      const body = await response.text()
+      throw new TinyApiError(`Olist ERP API v3 ${path} retornou ${response.status}: ${body}`, response.status)
+    }
+
+    return (await response.json()) as T
   }
-
-  return (await response.json()) as T
 }
 
 function itemToMinimalDetail(item: TinyOrderListItem): TinyOrderDetail {
