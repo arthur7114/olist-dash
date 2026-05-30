@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { Database, Loader2, LogOut } from "lucide-react"
+import { Database, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LogoutButton } from "@/components/dashboard/logout-button"
 import { useFiltros } from "@/lib/filters"
 import { cn } from "@/lib/utils"
 
@@ -26,12 +27,7 @@ export function DataSourceStatus() {
       </span>
 
       {autenticado ? (
-        <Button asChild variant="outline" size="sm" className="hidden bg-background sm:inline-flex">
-          <Link href="/api/olist/auth/logout">
-            <LogOut className="h-4 w-4" />
-            Sair
-          </Link>
-        </Button>
+        <LogoutButton />
       ) : (
         <Button asChild size="sm" className="hidden sm:inline-flex">
           <Link href="/api/olist/auth/start">Conectar Olist</Link>

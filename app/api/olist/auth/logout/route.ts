@@ -12,7 +12,3 @@ export async function POST(request: Request) {
   response.cookies.delete(OLIST_STATE_COOKIE)
   return response
 }
-
-export async function GET(request: Request) {
-  return POST(request)
-}
