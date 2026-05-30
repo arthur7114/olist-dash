@@ -9,6 +9,8 @@ import {
 } from "@/lib/olist-v3"
 
 export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const periodo = url.searchParams.get("periodo") ?? "7d"
   const cookieStore = await cookies()
   let accessToken = cookieStore.get(OLIST_ACCESS_COOKIE)?.value
   const refreshToken = cookieStore.get(OLIST_REFRESH_COOKIE)?.value
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
       accessToken = refreshed.access_token
     }
 
-    const pedidos = await fetchTinyOrders(accessToken as string)
+    const pedidos = await fetchTinyOrders(accessToken as string, periodo)
     const response = NextResponse.json({
       source: "real",
       authenticated: true,
@@ -46,7 +48,7 @@ export async function GET(request: Request) {
     if (refreshToken) {
       try {
         const refreshed = await refreshAccessToken(refreshToken)
-        const pedidos = await fetchTinyOrders(refreshed.access_token)
+        const pedidos = await fetchTinyOrders(refreshed.access_token, periodo)
         const retryResponse = NextResponse.json({
           source: "real",
           authenticated: true,

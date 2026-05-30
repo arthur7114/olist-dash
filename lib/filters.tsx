@@ -75,7 +75,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     async function carregarPedidos() {
       setCarregando(true)
       try {
-        const response = await fetch("/api/olist/orders", { cache: "no-store" })
+        const response = await fetch(`/api/olist/orders?periodo=${filtros.periodo}`, { cache: "no-store" })
         const data = (await response.json()) as {
           source?: "mock" | "real"
           authenticated?: boolean
@@ -104,7 +104,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     return () => {
       ativo = false
     }
-  }, [])
+  }, [filtros.periodo])
 
   const setFiltro = <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => {
     setFiltros((prev) => {

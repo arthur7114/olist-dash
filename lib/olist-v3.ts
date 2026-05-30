@@ -17,6 +17,17 @@ export type TinyTokenResponse = {
   token_type?: string
 }
 
+type OrderPeriod = "7d" | "15d" | "30d" | "tudo"
+
+class TinyApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message)
+  }
+}
+
 type TinyListResponse<T> = {
   itens?: T[]
   paginacao?: {
@@ -224,9 +235,9 @@ async function tokenRequest(params: Record<string, string>) {
   return (await response.json()) as TinyTokenResponse
 }
 
-export async function fetchTinyOrders(accessToken: string): Promise<Pedido[]> {
-  const items = await fetchRecentOrderList(accessToken)
-  const details = await mapWithConcurrency(items, 8, async (item) => {
+export async function fetchTinyOrders(accessToken: string, period: string = "7d"): Promise<Pedido[]> {
+  const items = await fetchRecentOrderList(accessToken, normalizePeriod(period))
+  const details = await mapWithConcurrency(items, 3, async (item) => {
     if (!item.id) return null
     try {
       const detail = await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
@@ -245,14 +256,14 @@ export async function fetchTinyOrders(accessToken: string): Promise<Pedido[]> {
     .sort((a, b) => (a.data < b.data ? 1 : -1))
 }
 
-async function fetchRecentOrderList(accessToken: string) {
-  const { dataInicial, dataFinal } = getDefaultOrderDateRange()
+async function fetchRecentOrderList(accessToken: string, period: OrderPeriod) {
+  const { dataInicial, dataFinal, maxItems } = getOrderDateRange(period)
   const items: TinyOrderListItem[] = []
   const limit = 100
   let offset = 0
   let total = Number.POSITIVE_INFINITY
 
-  while (offset < total && items.length < 1000) {
+  while (offset < total && items.length < maxItems) {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
@@ -260,10 +271,16 @@ async function fetchRecentOrderList(accessToken: string) {
       dataInicial,
       dataFinal,
     })
-    const list = await tinyFetch<TinyListResponse<TinyOrderListItem>>(
-      accessToken,
-      `/pedidos?${params.toString()}`,
-    )
+    let list: TinyListResponse<TinyOrderListItem>
+    try {
+      list = await tinyFetch<TinyListResponse<TinyOrderListItem>>(
+        accessToken,
+        `/pedidos?${params.toString()}`,
+      )
+    } catch (err) {
+      if (err instanceof TinyApiError && err.status === 429 && items.length > 0) break
+      throw err
+    }
     const pageItems = list.itens ?? []
     items.push(...pageItems)
     total = list.paginacao?.total ?? items.length
@@ -271,7 +288,7 @@ async function fetchRecentOrderList(accessToken: string) {
     offset += limit
   }
 
-  return items
+  return items.slice(0, maxItems)
 }
 
 async function tinyFetch<T>(accessToken: string, path: string): Promise<T> {
@@ -285,7 +302,7 @@ async function tinyFetch<T>(accessToken: string, path: string): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text()
-    throw new Error(`Olist ERP API v3 ${path} retornou ${response.status}: ${body}`)
+    throw new TinyApiError(`Olist ERP API v3 ${path} retornou ${response.status}: ${body}`, response.status)
   }
 
   return (await response.json()) as T
@@ -376,7 +393,7 @@ async function fetchProductCosts(
   const refs = collectProductRefs(orders)
   const lookup: ProductCostLookup = { byId: new Map(), bySku: new Map() }
 
-  await mapWithConcurrency(refs.ids.slice(0, 300), 8, async (id) => {
+  await mapWithConcurrency(refs.ids.slice(0, 120), 3, async (id) => {
     try {
       const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
       setProductCost(lookup, { id, sku: product.sku, cost: getProductCost(product) })
@@ -391,7 +408,7 @@ async function fetchProductCosts(
   })
 
   const missingSkus = refs.skus.filter((sku) => !lookup.bySku.has(sku))
-  await mapWithConcurrency(missingSkus.slice(0, 500), 8, async (sku) => {
+  await mapWithConcurrency(missingSkus.slice(0, 120), 3, async (sku) => {
     try {
       const params = new URLSearchParams({ codigo: sku, limit: "1", situacao: "A" })
       const list = await tinyFetch<TinyListResponse<TinyProductListItem>>(
@@ -469,7 +486,7 @@ async function fetchReceivablePayments(
     if (order && payment) payments.set(getOrderPaymentKey(order), payment)
   }
 
-  await mapWithConcurrency(receivableCandidates.slice(0, 500), 8, async (receivable) => {
+  await mapWithConcurrency(receivableCandidates.slice(0, 200), 3, async (receivable) => {
     if (!receivable.id) return
     const order = findReceivableOrder(receivable, ordersMissingPayment)
     if (!order || payments.has(getOrderPaymentKey(order))) return
@@ -486,7 +503,7 @@ async function fetchReceivablePayments(
   const remainingOrders = Array.from(ordersMissingPayment.values()).filter(
     (order) => !payments.has(getOrderPaymentKey(order)),
   )
-  await mapWithConcurrency(remainingOrders.slice(0, 1000), 8, async (order) => {
+  await mapWithConcurrency(remainingOrders.slice(0, 250), 3, async (order) => {
     const payment = await fetchReceivablePaymentByOrder(accessToken, order)
     if (payment) payments.set(getOrderPaymentKey(order), payment)
   })
@@ -515,13 +532,13 @@ async function fetchReceivablePaymentByOrder(accessToken: string, order: TinyOrd
 }
 
 async function fetchRecentReceivables(accessToken: string) {
-  const { dataInicial, dataFinal } = getDefaultOrderDateRange()
+  const { dataInicial, dataFinal } = getOrderDateRange("7d")
   const items: TinyReceivableListItem[] = []
   const limit = 100
   let offset = 0
   let total = Number.POSITIVE_INFINITY
 
-  while (offset < total && items.length < 1000) {
+  while (offset < total && items.length < 300) {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
@@ -529,10 +546,16 @@ async function fetchRecentReceivables(accessToken: string) {
       dataInicialEmissao: dataInicial,
       dataFinalEmissao: dataFinal,
     })
-    const list = await tinyFetch<TinyListResponse<TinyReceivableListItem>>(
-      accessToken,
-      `/contas-receber?${params.toString()}`,
-    )
+    let list: TinyListResponse<TinyReceivableListItem>
+    try {
+      list = await tinyFetch<TinyListResponse<TinyReceivableListItem>>(
+        accessToken,
+        `/contas-receber?${params.toString()}`,
+      )
+    } catch (err) {
+      if (err instanceof TinyApiError && err.status === 429 && items.length > 0) break
+      throw err
+    }
     const pageItems = list.itens ?? []
     items.push(...pageItems)
     total = list.paginacao?.total ?? items.length
@@ -540,7 +563,7 @@ async function fetchRecentReceivables(accessToken: string) {
     offset += limit
   }
 
-  return items
+  return items.slice(0, 300)
 }
 
 function findReceivableOrder(
@@ -690,14 +713,32 @@ function getOrderPaymentKey(order: TinyOrderDetail) {
   return String(order.id ?? order.numeroPedido ?? "")
 }
 
-function getDefaultOrderDateRange() {
+function normalizePeriod(period: string): OrderPeriod {
+  if (period === "7d" || period === "15d" || period === "30d" || period === "tudo") return period
+  return "7d"
+}
+
+function getOrderDateRange(period: OrderPeriod) {
+  const daysByPeriod: Record<OrderPeriod, number> = {
+    "7d": 7,
+    "15d": 15,
+    "30d": 30,
+    tudo: 30,
+  }
+  const maxItemsByPeriod: Record<OrderPeriod, number> = {
+    "7d": 300,
+    "15d": 400,
+    "30d": 500,
+    tudo: 500,
+  }
   const final = new Date()
   const inicial = new Date(final)
-  inicial.setDate(final.getDate() - 30)
+  inicial.setDate(final.getDate() - daysByPeriod[period])
 
   return {
     dataInicial: formatDateParam(inicial),
     dataFinal: formatDateParam(final),
+    maxItems: maxItemsByPeriod[period],
   }
 }
 
