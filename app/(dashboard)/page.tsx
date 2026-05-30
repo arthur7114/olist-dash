@@ -1,0 +1,56 @@
+"use client"
+
+import {
+  DollarSign,
+  ShoppingCart,
+  Truck,
+  Undo2,
+  TrendingUp,
+  Receipt,
+  Percent,
+  Layers,
+} from "lucide-react"
+import { PageTitle } from "@/components/dashboard/page-title"
+import { GlobalFilters } from "@/components/dashboard/global-filters"
+import { KpiCard } from "@/components/dashboard/kpi-card"
+import { CanalBarChart, FaturamentoLucroChart } from "@/components/dashboard/overview-charts"
+import { useFiltros } from "@/lib/filters"
+import { calcularKPIs, formatBRL, formatMarkup, formatNumero, formatPercent } from "@/lib/data"
+
+export default function VisaoGeralPage() {
+  const { pedidosFiltrados } = useFiltros()
+  const kpi = calcularKPIs(pedidosFiltrados)
+
+  const cards = [
+    { titulo: "Faturamento bruto", valor: formatBRL(kpi.faturamentoBruto), icone: DollarSign, variacao: 0.124, destaque: "positivo" as const, legenda: "vs. período anterior" },
+    { titulo: "Quantidade de pedidos", valor: formatNumero(kpi.quantidadePedidos), icone: ShoppingCart, variacao: 0.061, destaque: "default" as const, legenda: "pedidos no período" },
+    { titulo: "Valor total de frete", valor: formatBRL(kpi.totalFrete), icone: Truck, variacao: 0.028, destaque: "default" as const, legenda: "custo logístico" },
+    { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: -0.043, destaque: "alerta" as const, legenda: "vs. período anterior" },
+    { titulo: "Lucro bruto", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: 0.097, destaque: "positivo" as const, legenda: "após custos e taxas" },
+    { titulo: "Ticket médio", valor: formatBRL(kpi.ticketMedio), icone: Receipt, variacao: 0.035, destaque: "default" as const, legenda: "por pedido" },
+    { titulo: "Margem média", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: 0.018, destaque: "positivo" as const, legenda: "lucro / faturamento" },
+    { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: 0.012, destaque: "default" as const, legenda: "venda / custo" },
+  ]
+
+  return (
+    <>
+      <PageTitle
+        titulo="Visão Geral"
+        descricao="Indicadores consolidados de vendas, margens e rentabilidade da operação."
+      />
+
+      <GlobalFilters />
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((c) => (
+          <KpiCard key={c.titulo} {...c} />
+        ))}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <FaturamentoLucroChart pedidos={pedidosFiltrados} />
+        <CanalBarChart pedidos={pedidosFiltrados} />
+      </section>
+    </>
+  )
+}
