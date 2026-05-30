@@ -12,9 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  CANAIS,
-  FORMAS_PAGAMENTO,
-  PRODUTOS,
   VENDEDORES_POR_CANAL,
 } from "@/lib/data"
 import { useFiltros } from "@/lib/filters"
@@ -27,14 +24,14 @@ const PERIODOS: { valor: "7d" | "15d" | "30d" | "tudo"; label: string }[] = [
 ]
 
 export function GlobalFilters() {
-  const { filtros, setFiltro, limpar } = useFiltros()
+  const { filtros, setFiltro, limpar, opcoes } = useFiltros()
 
   const vendedoresDisponiveis = useMemo(() => {
     if (filtros.canal === "todos") {
-      return Array.from(new Set(Object.values(VENDEDORES_POR_CANAL).flat()))
+      return opcoes.vendedores
     }
-    return VENDEDORES_POR_CANAL[filtros.canal]
-  }, [filtros.canal])
+    return VENDEDORES_POR_CANAL[filtros.canal] ?? opcoes.vendedores
+  }, [filtros.canal, filtros.vendedor, opcoes.vendedores])
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -67,7 +64,7 @@ export function GlobalFilters() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todos os canais</SelectItem>
-              {CANAIS.map((c) => (
+              {opcoes.canais.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -101,7 +98,7 @@ export function GlobalFilters() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todos os SKUs</SelectItem>
-              {PRODUTOS.map((p) => (
+              {opcoes.produtos.map((p) => (
                 <SelectItem key={p.sku} value={p.sku}>
                   {p.sku}
                 </SelectItem>
@@ -121,7 +118,7 @@ export function GlobalFilters() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todas as formas</SelectItem>
-              {FORMAS_PAGAMENTO.map((f) => (
+              {opcoes.formasPagamento.map((f) => (
                 <SelectItem key={f} value={f}>
                   {f}
                 </SelectItem>

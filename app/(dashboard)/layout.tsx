@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
+import { DataSourceStatus } from "@/components/dashboard/data-source-status"
 import { ThemeToggle } from "@/components/dashboard/theme-toggle"
 import { FiltrosProvider } from "@/lib/filters"
 
@@ -19,6 +20,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <span className="text-sm text-muted-foreground">/ Painel comercial</span>
             </div>
             <div className="ml-auto flex items-center gap-3">
+              <DataSourceStatus />
               <span className="hidden text-xs text-muted-foreground sm:inline">Atualizado em 30/05/2026</span>
               <ThemeToggle />
             </div>

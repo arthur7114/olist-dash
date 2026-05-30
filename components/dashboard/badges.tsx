@@ -5,6 +5,7 @@ const statusEstilo: Record<StatusPagamento, string> = {
   Pago: "bg-success/12 text-success border-success/20",
   Pendente: "bg-warning/15 text-warning-foreground border-warning/30",
   Estornado: "bg-destructive/12 text-destructive border-destructive/20",
+  Parcial: "bg-accent text-accent-foreground border-border",
   Cancelado: "bg-muted text-muted-foreground border-border",
 }
 
@@ -22,6 +23,7 @@ export function StatusPagamentoBadge({ status }: { status: StatusPagamento }) {
           status === "Pago" && "bg-success",
           status === "Pendente" && "bg-warning",
           status === "Estornado" && "bg-destructive",
+          status === "Parcial" && "bg-accent-foreground",
           status === "Cancelado" && "bg-muted-foreground",
         )}
       />

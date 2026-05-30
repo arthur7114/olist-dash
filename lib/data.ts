@@ -2,12 +2,7 @@
 // Tipos
 // ----------------------------------------------------------------------------
 
-export type Canal =
-  | "Mercado Livre"
-  | "Site"
-  | "WhatsApp"
-  | "Vendedor interno"
-  | "Vendedor externo"
+export type Canal = string
 
 export type FormaPagamento =
   | "Pix"
@@ -15,7 +10,7 @@ export type FormaPagamento =
   | "Boleto"
   | "Cartão de débito"
 
-export type StatusPagamento = "Pago" | "Pendente" | "Estornado" | "Cancelado"
+export type StatusPagamento = "Pago" | "Pendente" | "Estornado" | "Parcial" | "Cancelado"
 
 export type ClasseABC = "A" | "B" | "C"
 
@@ -94,7 +89,7 @@ const TAXA_CANAL: Record<Canal, number> = {
   "Vendedor externo": 0.05,
 }
 
-const STATUS: StatusPagamento[] = ["Pago", "Pago", "Pago", "Pendente", "Estornado", "Cancelado"]
+const STATUS: StatusPagamento[] = ["Pago", "Pago", "Pago", "Pendente", "Estornado", "Parcial"]
 
 // ----------------------------------------------------------------------------
 // Gerador determinístico (mock realista e estável entre renders)
