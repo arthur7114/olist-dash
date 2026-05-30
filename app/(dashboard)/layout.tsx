@@ -3,6 +3,7 @@ import Image from "next/image"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
+import { DataSourceAlert } from "@/components/dashboard/data-source-alert"
 import { DataSourceStatus } from "@/components/dashboard/data-source-status"
 import { ThemeToggle } from "@/components/dashboard/theme-toggle"
 import { FiltrosProvider } from "@/lib/filters"
@@ -41,7 +42,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex flex-1 flex-col gap-6 p-4 md:p-6">{children}</main>
+          <main className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+            <DataSourceAlert />
+            {children}
+          </main>
         </SidebarInset>
       </SidebarProvider>
     </FiltrosProvider>
