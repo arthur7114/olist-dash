@@ -1,4 +1,4 @@
-import { desc, gte, sql } from "drizzle-orm"
+import { and, desc, gte, lte, sql } from "drizzle-orm"
 import { getDb } from "./client"
 import { orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
@@ -12,6 +12,16 @@ export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> 
     .where(gte(orders.data, dataInicial))
     .orderBy(desc(orders.data))
   return rows.map(rowToPedido)
+}
+
+// IDs de pedidos já no banco numa janela — usado para o backfill pular o que já foi sincronizado.
+export async function getExistingOrderIds(dataInicial: string, dataFinal: string): Promise<Set<string>> {
+  const db = getDb()
+  const rows = await db
+    .select({ id: orders.olistId })
+    .from(orders)
+    .where(and(gte(orders.data, dataInicial), lte(orders.data, dataFinal)))
+  return new Set(rows.map((r) => r.id))
 }
 
 function rowToPedido(r: typeof orders.$inferSelect): Pedido {

@@ -249,38 +249,70 @@ export type SyncOrder = {
   raw: TinyOrderDetail
 }
 
-export async function loadOrdersForSync(
+export type SyncBatchHandler = (orders: SyncOrder[]) => Promise<unknown>
+
+// Processa uma janela de datas de forma INCREMENTAL e resumível: busca a lista e, para
+// cada pedido, o detalhe, montando lotes gravados via `onBatch`. Ao atingir `deadline`,
+// para (completed=false) — o que já foi gravado em lote persiste, então a próxima
+// execução continua. `skip` pula pedidos já sincronizados (backfill não refaz trabalho).
+// Não busca contas-receber (a forma de pagamento vem do próprio detalhe do pedido).
+export async function syncOrdersIncremental(
   accessToken: string,
-  opts: { dataInicial: string; dataFinal: string; maxItems?: number; detailLimit?: number },
-): Promise<SyncOrder[]> {
+  opts: {
+    dataInicial: string
+    dataFinal: string
+    deadline: number
+    maxItems?: number
+    batchSize?: number
+    skip?: (olistId: string) => boolean
+    onBatch: SyncBatchHandler
+  },
+): Promise<{ processed: number; listed: number; completed: boolean }> {
   const maxItems = opts.maxItems ?? 5000
-  const detailLimit = opts.detailLimit ?? Number.POSITIVE_INFINITY
+  const batchSize = opts.batchSize ?? 25
   const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
-  const details = await mapWithConcurrency(items, 3, async (item, index) => {
-    if (!item.id) return null
-    if (index >= detailLimit) return { detail: itemToMinimalDetail(item), level: "summary" as const }
-    try {
-      const detail = await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
-      return { detail: mergeOrderListItemWithDetail(item, detail), level: "full" as const }
-    } catch {
-      return { detail: itemToMinimalDetail(item), level: "summary" as const }
+  let processed = 0
+  let completed = true
+  let batch: TinyOrderDetail[] = []
+
+  const flush = async () => {
+    if (!batch.length) return
+    const productCosts = await fetchProductCosts(accessToken, batch)
+    const noPayments = new Map<string, string>()
+    const mapped: SyncOrder[] = batch.map((detail) => ({
+      pedido: mapOrderToPedido(detail, productCosts, noPayments),
+      situacao: detail.situacao,
+      detailLevel: "full",
+      raw: detail,
+    }))
+    await opts.onBatch(mapped)
+    processed += mapped.length
+    batch = []
+  }
+
+  for (const item of items) {
+    if (!item.id) continue
+    if (opts.skip?.(String(item.id))) continue
+    if (Date.now() >= opts.deadline) {
+      completed = false
+      break
     }
-  })
+    let detail: TinyOrderDetail
+    try {
+      detail = mergeOrderListItemWithDetail(
+        item,
+        await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`),
+      )
+    } catch {
+      detail = itemToMinimalDetail(item)
+    }
+    batch.push(detail)
+    if (batch.length >= batchSize) await flush()
+  }
+  await flush()
 
-  const valid = details.filter(
-    (d): d is { detail: TinyOrderDetail; level: "full" | "summary" } => Boolean(d),
-  )
-  const detailList = valid.map((d) => d.detail)
-  const productCosts = await fetchProductCosts(accessToken, detailList)
-  const receivablePayments = await fetchReceivablePayments(accessToken, detailList)
-
-  return valid.map(({ detail, level }) => ({
-    pedido: mapOrderToPedido(detail, productCosts, receivablePayments),
-    situacao: detail.situacao,
-    detailLevel: level,
-    raw: detail,
-  }))
+  return { processed, listed: items.length, completed }
 }
 
 // Ponte entre o cache de custo em memória e a tabela product_costs (persiste entre
