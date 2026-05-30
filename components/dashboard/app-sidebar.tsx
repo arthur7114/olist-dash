@@ -1,12 +1,12 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, ReceiptText, Store, BarChart3, Package } from "lucide-react"
+import { LayoutDashboard, ReceiptText, Store, BarChart3 } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -28,14 +28,15 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2.5 px-2 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            <Package className="h-5 w-5" />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-base font-semibold text-sidebar-foreground">Olist</span>
-            <span className="text-xs text-sidebar-foreground/60">Painel de Vendas</span>
-          </div>
+        <div className="flex items-center px-2 py-3">
+          <Image
+            src="/oem-logo-white.png"
+            alt="OEM Parts"
+            width={146}
+            height={80}
+            priority
+            className="h-12 w-auto object-contain"
+          />
         </div>
       </SidebarHeader>
 
@@ -59,18 +60,6 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter className="border-t border-sidebar-border">
-        <div className="flex items-center gap-2.5 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium text-sidebar-accent-foreground">
-            RC
-          </div>
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-medium text-sidebar-foreground">Renata Castro</span>
-            <span className="text-xs text-sidebar-foreground/60">Gestora comercial</span>
-          </div>
-        </div>
-      </SidebarFooter>
     </Sidebar>
   )
 }

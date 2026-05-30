@@ -8,8 +8,8 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Olist · Painel de Vendas',
-  description: 'Dashboard de vendas, pedidos, canais e curva ABC de produtos da Olist.',
+  title: 'OEM Parts · Painel de Vendas',
+  description: 'Dashboard de vendas, pedidos, canais e curva ABC de produtos da OEM Parts.',
   generator: 'v0.app',
   icons: {
     icon: [

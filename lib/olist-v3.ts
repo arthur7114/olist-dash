@@ -37,6 +37,7 @@ type TinyOrderListItem = {
   }
   dataCriacao?: string
   valor?: string | number
+  situacao?: number
   vendedor?: {
     nome?: string
   }
@@ -65,8 +66,20 @@ type TinyOrderDetail = TinyOrderListItem & {
     meioPagamento?: {
       nome?: string
     }
+    formaPagamento?: {
+      nome?: string
+    }
     parcelas?: Array<{
       valor?: number
+      formaRecebimento?: {
+        nome?: string
+      }
+      meioPagamento?: {
+        nome?: string
+      }
+      formaPagamento?: {
+        nome?: string
+      }
     }>
   }
   itens?: Array<{
@@ -78,15 +91,69 @@ type TinyOrderDetail = TinyOrderListItem & {
     quantidade?: number
     valorUnitario?: number
   }>
+  pagamentosIntegrados?: Array<{
+    formaRecebimento?: {
+      nome?: string
+    }
+    meioPagamento?: {
+      nome?: string
+    }
+    formaPagamento?: {
+      nome?: string
+    }
+    tipoPagamento?: number
+  }>
 }
 
 type TinyProductDetail = {
   id?: number
+  sku?: string
   precos?: {
     precoCusto?: number
     precoCustoMedio?: number
   }
 }
+
+type TinyProductListItem = TinyProductDetail & {
+  descricao?: string
+}
+
+type TinyProductCostList = {
+  itens?: Array<{
+    precoCusto?: number
+    custoMedio?: number
+  }>
+}
+
+type ProductCostLookup = {
+  byId: Map<number, number>
+  bySku: Map<string, number>
+}
+
+type TinyReceivableListItem = {
+  id?: number
+  idVenda?: number
+  idNota?: number
+  venda?: {
+    id?: number
+  }
+  nota?: {
+    id?: number
+  }
+  numeroDocumento?: string
+  serieDocumento?: string
+  formaRecebimento?: {
+    nome?: string
+  }
+  meioPagamento?: {
+    nome?: string
+  }
+  formaPagamento?: {
+    nome?: string
+  }
+}
+
+type TinyReceivableDetail = TinyReceivableListItem
 
 export function getBaseUrl(request: Request) {
   const configured = process.env.OLIST_REDIRECT_BASE_URL
@@ -162,36 +229,19 @@ export async function fetchTinyOrders(accessToken: string): Promise<Pedido[]> {
   const details = await mapWithConcurrency(items, 8, async (item) => {
     if (!item.id) return null
     try {
-      return await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
+      const detail = await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
+      return mergeOrderListItemWithDetail(item, detail)
     } catch {
       return itemToMinimalDetail(item)
     }
   })
 
-  const productIds = Array.from(
-    new Set(
-      details
-        .flatMap((order) => order?.itens ?? [])
-        .map((item) => item.produto?.id)
-        .filter((id): id is number => typeof id === "number"),
-    ),
-  )
+  const validDetails = details.filter((order): order is TinyOrderDetail => Boolean(order))
+  const productCosts = await fetchProductCosts(accessToken, validDetails)
+  const receivablePayments = await fetchReceivablePayments(accessToken, validDetails)
 
-  const productCostMap = new Map<number, number>()
-  await Promise.all(
-    productIds.slice(0, 80).map(async (id) => {
-      try {
-        const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
-        productCostMap.set(id, product.precos?.precoCustoMedio ?? product.precos?.precoCusto ?? 0)
-      } catch {
-        productCostMap.set(id, 0)
-      }
-    }),
-  )
-
-  return details
-    .filter((order): order is TinyOrderDetail => Boolean(order))
-    .map((order) => mapOrderToPedido(order, productCostMap))
+  return validDetails
+    .map((order) => mapOrderToPedido(order, productCosts, receivablePayments))
     .sort((a, b) => (a.data < b.data ? 1 : -1))
 }
 
@@ -259,7 +309,27 @@ function itemToMinimalDetail(item: TinyOrderListItem): TinyOrderDetail {
   }
 }
 
-function mapOrderToPedido(order: TinyOrderDetail, productCostMap: Map<number, number>): Pedido {
+function mergeOrderListItemWithDetail(
+  item: TinyOrderListItem,
+  detail: TinyOrderDetail,
+): TinyOrderDetail {
+  return {
+    ...item,
+    ...detail,
+    ecommerce: detail.ecommerce ?? item.ecommerce,
+    vendedor: detail.vendedor ?? item.vendedor,
+    transportador: detail.transportador ?? item.transportador,
+    dataCriacao: detail.dataCriacao ?? item.dataCriacao,
+    valor: detail.valor ?? item.valor,
+    situacao: detail.situacao ?? item.situacao,
+  }
+}
+
+function mapOrderToPedido(
+  order: TinyOrderDetail,
+  productCosts: ProductCostLookup,
+  receivablePayments: Map<string, string>,
+): Pedido {
   const itens = order.itens?.length ? order.itens : itemToMinimalDetail(order).itens ?? []
   const totalItens = itens.reduce(
     (sum, item) => sum + toNumber(item.valorUnitario) * Math.max(1, toNumber(item.quantidade)),
@@ -267,10 +337,14 @@ function mapOrderToPedido(order: TinyOrderDetail, productCostMap: Map<number, nu
   )
   const primeiroItem = itens[0]
   const pedidoId = String(order.id ?? order.numeroPedido ?? crypto.randomUUID())
-  const valorVenda = toNumber(order.valorTotalPedido) || toNumber(order.valor) || totalItens
+  const valorVenda = getValorVenda(order, totalItens)
   const custoTotal = itens.reduce((sum, item) => {
     const produtoId = item.produto?.id
-    const custoMedio = produtoId ? productCostMap.get(produtoId) ?? 0 : 0
+    const sku = normalizeSku(item.produto?.sku)
+    const custoMedio =
+      (produtoId ? productCosts.byId.get(produtoId) : undefined) ??
+      (sku ? productCosts.bySku.get(sku) : undefined) ??
+      0
     return sum + custoMedio * Math.max(1, toNumber(item.quantidade))
   }, 0)
   const devolucao = order.situacao === 2 ? valorVenda : 0
@@ -284,7 +358,7 @@ function mapOrderToPedido(order: TinyOrderDetail, productCostMap: Map<number, nu
     produto: `${primeiroItem?.produto?.descricao || "Pedido sem item"}${sufixoProduto}`,
     canal: getCanal(order),
     vendedor: order.vendedor?.nome || "Sem vendedor",
-    formaPagamento: getFormaPagamento(order),
+    formaPagamento: getFormaPagamento(order, receivablePayments),
     valorVenda: roundMoney(valorVenda),
     valorFrete: roundMoney(toNumber(order.valorFrete)),
     devolucao: roundMoney(devolucao),
@@ -293,6 +367,208 @@ function mapOrderToPedido(order: TinyOrderDetail, productCostMap: Map<number, nu
     statusPagamento: getStatusPagamento(order),
     data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
   }
+}
+
+async function fetchProductCosts(
+  accessToken: string,
+  orders: TinyOrderDetail[],
+): Promise<ProductCostLookup> {
+  const refs = collectProductRefs(orders)
+  const lookup: ProductCostLookup = { byId: new Map(), bySku: new Map() }
+
+  await mapWithConcurrency(refs.ids.slice(0, 300), 8, async (id) => {
+    try {
+      const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
+      setProductCost(lookup, { id, sku: product.sku, cost: getProductCost(product) })
+
+      if (!lookup.byId.get(id)) {
+        const history = await tinyFetch<TinyProductCostList>(accessToken, `/produtos/${id}/custos?limit=1`)
+        setProductCost(lookup, { id, sku: product.sku, cost: getProductCostFromHistory(history) })
+      }
+    } catch {
+      lookup.byId.set(id, 0)
+    }
+  })
+
+  const missingSkus = refs.skus.filter((sku) => !lookup.bySku.has(sku))
+  await mapWithConcurrency(missingSkus.slice(0, 500), 8, async (sku) => {
+    try {
+      const params = new URLSearchParams({ codigo: sku, limit: "1", situacao: "A" })
+      const list = await tinyFetch<TinyListResponse<TinyProductListItem>>(
+        accessToken,
+        `/produtos?${params.toString()}`,
+      )
+      const product = list.itens?.[0]
+      setProductCost(lookup, { id: product?.id, sku, cost: getProductCost(product) })
+    } catch {
+      lookup.bySku.set(sku, 0)
+    }
+  })
+
+  return lookup
+}
+
+function collectProductRefs(orders: TinyOrderDetail[]) {
+  const ids = new Set<number>()
+  const skus = new Set<string>()
+
+  for (const order of orders) {
+    for (const item of order.itens ?? []) {
+      const id = item.produto?.id
+      const sku = normalizeSku(item.produto?.sku)
+      if (typeof id === "number") ids.add(id)
+      if (sku) skus.add(sku)
+    }
+  }
+
+  return { ids: Array.from(ids), skus: Array.from(skus) }
+}
+
+function setProductCost(
+  lookup: ProductCostLookup,
+  product: { id?: number; sku?: string; cost?: number },
+) {
+  const cost = product.cost ?? 0
+  const sku = normalizeSku(product.sku)
+  if (typeof product.id === "number") lookup.byId.set(product.id, cost)
+  if (sku) lookup.bySku.set(sku, cost)
+}
+
+function getProductCost(product: TinyProductDetail | undefined) {
+  return firstPositive(product?.precos?.precoCustoMedio, product?.precos?.precoCusto)
+}
+
+function getProductCostFromHistory(history: TinyProductCostList) {
+  const latest = history.itens?.[0]
+  return firstPositive(latest?.custoMedio, latest?.precoCusto)
+}
+
+async function fetchReceivablePayments(
+  accessToken: string,
+  orders: TinyOrderDetail[],
+): Promise<Map<string, string>> {
+  const payments = new Map<string, string>()
+  const ordersMissingPayment = new Map<string, TinyOrderDetail>()
+
+  for (const order of orders) {
+    const key = getOrderPaymentKey(order)
+    if (key && !getDirectPaymentName(order)) ordersMissingPayment.set(key, order)
+  }
+
+  if (!ordersMissingPayment.size) return payments
+
+  const receivables = await fetchRecentReceivables(accessToken)
+  const receivableCandidates = receivables.filter((receivable) => {
+    const order = findReceivableOrder(receivable, ordersMissingPayment)
+    return Boolean(order && !getReceivablePaymentName(receivable))
+  })
+
+  for (const receivable of receivables) {
+    const order = findReceivableOrder(receivable, ordersMissingPayment)
+    const payment = getReceivablePaymentName(receivable)
+    if (order && payment) payments.set(getOrderPaymentKey(order), payment)
+  }
+
+  await mapWithConcurrency(receivableCandidates.slice(0, 500), 8, async (receivable) => {
+    if (!receivable.id) return
+    const order = findReceivableOrder(receivable, ordersMissingPayment)
+    if (!order || payments.has(getOrderPaymentKey(order))) return
+
+    try {
+      const detail = await tinyFetch<TinyReceivableDetail>(accessToken, `/contas-receber/${receivable.id}`)
+      const payment = getReceivablePaymentName(detail)
+      if (payment) payments.set(getOrderPaymentKey(order), payment)
+    } catch {
+      // Keep the order payment as unknown when the financial record cannot be read.
+    }
+  })
+
+  const remainingOrders = Array.from(ordersMissingPayment.values()).filter(
+    (order) => !payments.has(getOrderPaymentKey(order)),
+  )
+  await mapWithConcurrency(remainingOrders.slice(0, 1000), 8, async (order) => {
+    const payment = await fetchReceivablePaymentByOrder(accessToken, order)
+    if (payment) payments.set(getOrderPaymentKey(order), payment)
+  })
+
+  return payments
+}
+
+async function fetchReceivablePaymentByOrder(accessToken: string, order: TinyOrderDetail) {
+  if (!order.id) return undefined
+
+  try {
+    const params = new URLSearchParams({ idVenda: String(order.id), limit: "1" })
+    const list = await tinyFetch<TinyListResponse<TinyReceivableListItem>>(
+      accessToken,
+      `/contas-receber?${params.toString()}`,
+    )
+    const receivable = list.itens?.[0]
+    const listPayment = receivable ? getReceivablePaymentName(receivable) : undefined
+    if (listPayment || !receivable?.id) return listPayment
+
+    const detail = await tinyFetch<TinyReceivableDetail>(accessToken, `/contas-receber/${receivable.id}`)
+    return getReceivablePaymentName(detail)
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchRecentReceivables(accessToken: string) {
+  const { dataInicial, dataFinal } = getDefaultOrderDateRange()
+  const items: TinyReceivableListItem[] = []
+  const limit = 100
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+
+  while (offset < total && items.length < 1000) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      orderBy: "desc",
+      dataInicialEmissao: dataInicial,
+      dataFinalEmissao: dataFinal,
+    })
+    const list = await tinyFetch<TinyListResponse<TinyReceivableListItem>>(
+      accessToken,
+      `/contas-receber?${params.toString()}`,
+    )
+    const pageItems = list.itens ?? []
+    items.push(...pageItems)
+    total = list.paginacao?.total ?? items.length
+    if (pageItems.length < limit) break
+    offset += limit
+  }
+
+  return items
+}
+
+function findReceivableOrder(
+  receivable: TinyReceivableListItem,
+  orders: Map<string, TinyOrderDetail>,
+) {
+  const vendaId = receivable.idVenda ?? receivable.venda?.id
+  if (typeof vendaId === "number") {
+    const byVenda = orders.get(String(vendaId))
+    if (byVenda) return byVenda
+  }
+
+  const notaId = receivable.idNota ?? receivable.nota?.id
+  if (typeof notaId === "number") {
+    const byNota = Array.from(orders.values()).find((order) => order.idNotaFiscal === notaId)
+    if (byNota) return byNota
+  }
+
+  const documentNumber = normalizeDocumentNumber(
+    `${receivable.serieDocumento ?? ""}${receivable.numeroDocumento ?? ""}`,
+  )
+  if (!documentNumber) return undefined
+
+  return Array.from(orders.values()).find((order) => normalizeDocumentNumber(String(order.idNotaFiscal ?? "")) === documentNumber)
+}
+
+function getValorVenda(order: TinyOrderDetail, totalItens: number) {
+  return toNumber(order.valorTotalProdutos) || totalItens || toNumber(order.valorTotalPedido) || toNumber(order.valor)
 }
 
 function getCanal(order: TinyOrderDetail) {
@@ -304,12 +580,64 @@ function getCanal(order: TinyOrderDetail) {
   )
 }
 
-function getFormaPagamento(order: TinyOrderDetail): FormaPagamento {
+function getFormaPagamento(
+  order: TinyOrderDetail,
+  receivablePayments: Map<string, string>,
+): FormaPagamento {
   return (
-    order.pagamento?.meioPagamento?.nome ||
-    order.pagamento?.formaRecebimento?.nome ||
+    getDirectPaymentName(order) ||
+    receivablePayments.get(getOrderPaymentKey(order)) ||
     "Não informado"
   ) as FormaPagamento
+}
+
+function getDirectPaymentName(order: TinyOrderDetail) {
+  return firstText(
+    order.pagamento?.meioPagamento?.nome,
+    order.pagamento?.formaPagamento?.nome,
+    order.pagamento?.formaRecebimento?.nome,
+    ...((order.pagamento?.parcelas ?? []).flatMap((parcela) => [
+      parcela.meioPagamento?.nome,
+      parcela.formaPagamento?.nome,
+      parcela.formaRecebimento?.nome,
+    ])),
+    ...((order.pagamentosIntegrados ?? []).flatMap((pagamento) => [
+      pagamento.meioPagamento?.nome,
+      pagamento.formaPagamento?.nome,
+      pagamento.formaRecebimento?.nome,
+      getIntegratedPaymentName(pagamento.tipoPagamento),
+    ])),
+  )
+}
+
+function getReceivablePaymentName(receivable: TinyReceivableListItem) {
+  return firstText(
+    receivable.meioPagamento?.nome,
+    receivable.formaPagamento?.nome,
+    receivable.formaRecebimento?.nome,
+  )
+}
+
+function getIntegratedPaymentName(type: number | undefined) {
+  if (typeof type !== "number") return undefined
+
+  const paymentTypes: Record<number, string> = {
+    1: "Dinheiro",
+    2: "Cheque",
+    3: "CartÃ£o de crÃ©dito",
+    4: "CartÃ£o de dÃ©bito",
+    5: "CrÃ©dito loja",
+    10: "Vale alimentaÃ§Ã£o",
+    11: "Vale refeiÃ§Ã£o",
+    12: "Vale presente",
+    13: "Vale combustÃ­vel",
+    15: "Boleto",
+    16: "DepÃ³sito bancÃ¡rio",
+    17: "Pix",
+    18: "TransferÃªncia",
+  }
+
+  return paymentTypes[type]
 }
 
 function getStatusPagamento(order: TinyOrderDetail): StatusPagamento {
@@ -338,6 +666,28 @@ function toNumber(value: unknown) {
       : trimmed.replace(",", ".")
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function firstPositive(...values: Array<number | undefined>) {
+  return values.find((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ?? 0
+}
+
+function firstText(...values: Array<string | undefined>) {
+  return values.find((value) => typeof value === "string" && value.trim())?.trim()
+}
+
+function normalizeSku(value: string | undefined) {
+  const normalized = value?.trim()
+  if (!normalized || normalized === "sem-sku") return undefined
+  return normalized
+}
+
+function normalizeDocumentNumber(value: string) {
+  return value.replace(/\D/g, "")
+}
+
+function getOrderPaymentKey(order: TinyOrderDetail) {
+  return String(order.id ?? order.numeroPedido ?? "")
 }
 
 function getDefaultOrderDateRange() {
