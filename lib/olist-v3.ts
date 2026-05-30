@@ -280,8 +280,11 @@ export async function fetchTinyOrders(accessToken: string, period: string = "7d"
 
 async function loadTinyOrders(accessToken: string, period: OrderPeriod): Promise<Pedido[]> {
   const items = await fetchRecentOrderList(accessToken, period)
-  const details = await mapWithConcurrency(items, 3, async (item) => {
+  // A lista já vem por data desc: detalha só os ORDER_DETAIL_LIMIT pedidos mais recentes
+  // (1 chamada cada) e usa os próprios dados da lista para o restante, sem custo de API.
+  const details = await mapWithConcurrency(items, 3, async (item, index) => {
     if (!item.id) return null
+    if (index >= ORDER_DETAIL_LIMIT) return itemToMinimalDetail(item)
     try {
       const detail = await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
       return mergeOrderListItemWithDetail(item, detail)
@@ -337,13 +340,24 @@ async function fetchRecentOrderList(accessToken: string, period: OrderPeriod) {
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // --- Controle de taxa (o limite da Olist é por conta: 60/120/240 req/min conforme o plano) ---
-const RATE_LIMIT_PER_MIN = Number(process.env.OLIST_RATE_LIMIT_PER_MIN) || 60
+const RATE_LIMIT_PER_MIN = Number(process.env.OLIST_RATE_LIMIT_PER_MIN) || 120
 const MIN_REQUEST_INTERVAL_MS =
   Number(process.env.OLIST_MIN_REQUEST_INTERVAL_MS) ||
   Math.ceil(60_000 / (RATE_LIMIT_PER_MIN * 0.85)) // ~15% de folga abaixo do limite
 const MAX_RETRIES = Number(process.env.OLIST_MAX_RETRIES) || 5
 const BACKOFF_BASE_MS = 1500
 const BACKOFF_CAP_MS = 30_000
+
+// Nº de pedidos (mais recentes) que recebem detalhe completo (produto, custo, frete,
+// forma de pagamento) — 1 chamada cada. O restante usa só os dados da lista, sem custo
+// de API. 0 = nenhum (modo resumo). Mantém a carga dentro do orçamento de taxa.
+const parsedDetailLimit = Number(process.env.OLIST_ORDER_DETAIL_LIMIT)
+const ORDER_DETAIL_LIMIT =
+  Number.isFinite(parsedDetailLimit) && parsedDetailLimit >= 0 ? parsedDetailLimit : 80
+
+// Cascatas auxiliares caras (centenas de chamadas) ficam desligadas por padrão:
+const FETCH_RECEIVABLE_DETAILS = process.env.OLIST_FETCH_RECEIVABLE_DETAILS === "true"
+const DEEP_PRODUCT_COST = process.env.OLIST_DEEP_PRODUCT_COST === "true"
 
 // Portão serializado: garante um intervalo mínimo entre o INÍCIO de cada requisição,
 // independentemente da concorrência das etapas. Todas as chamadas à API passam por aqui,
@@ -515,7 +529,7 @@ async function fetchProductCosts(
       const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
       setProductCost(lookup, { id, sku: product.sku, cost: getProductCost(product) })
 
-      if (!lookup.byId.get(id)) {
+      if (DEEP_PRODUCT_COST && !lookup.byId.get(id)) {
         const history = await tinyFetch<TinyProductCostList>(accessToken, `/produtos/${id}/custos?limit=1`)
         setProductCost(lookup, { id, sku: product.sku, cost: getProductCostFromHistory(history) })
       }
@@ -524,6 +538,9 @@ async function fetchProductCosts(
       lookup.byId.set(id, 0)
     }
   })
+
+  // Busca por SKU (fallback) só com OLIST_DEEP_PRODUCT_COST=true — pode somar muitas chamadas.
+  if (!DEEP_PRODUCT_COST) return lookup
 
   const missingSkus = refs.skus.filter((sku) => {
     if (lookup.bySku.has(sku)) return false
@@ -600,17 +617,22 @@ async function fetchReceivablePayments(
 
   if (!ordersMissingPayment.size) return payments
 
+  // Lista de contas a receber (poucas chamadas) e preenche o que já vier nela.
   const receivables = await fetchRecentReceivables(accessToken)
-  const receivableCandidates = receivables.filter((receivable) => {
-    const order = findReceivableOrder(receivable, ordersMissingPayment)
-    return Boolean(order && !getReceivablePaymentName(receivable))
-  })
-
   for (const receivable of receivables) {
     const order = findReceivableOrder(receivable, ordersMissingPayment)
     const payment = getReceivablePaymentName(receivable)
     if (order && payment) payments.set(getOrderPaymentKey(order), payment)
   }
+
+  // As buscas de DETALHE (1 chamada por conta/por pedido, até centenas) ficam desligadas
+  // por padrão p/ não estourar a taxa; reative com OLIST_FETCH_RECEIVABLE_DETAILS=true.
+  if (!FETCH_RECEIVABLE_DETAILS) return payments
+
+  const receivableCandidates = receivables.filter((receivable) => {
+    const order = findReceivableOrder(receivable, ordersMissingPayment)
+    return Boolean(order && !getReceivablePaymentName(receivable))
+  })
 
   await mapWithConcurrency(receivableCandidates.slice(0, 200), 3, async (receivable) => {
     if (!receivable.id) return
