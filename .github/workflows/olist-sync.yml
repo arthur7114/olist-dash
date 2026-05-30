@@ -26,7 +26,8 @@ jobs:
           SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
           FULL: ${{ github.event.inputs.full }}
         run: |
+          set -eo pipefail
           URL="$BASE_URL/api/olist/sync"
           if [ -n "$FULL" ]; then URL="$URL?full=1"; fi
           echo "POST $URL"
-          curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 300 | tee /dev/stderr
+          curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 280 | tee /dev/stderr
