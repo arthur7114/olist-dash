@@ -1,0 +1,32 @@
+name: Olist sync
+
+on:
+  schedule:
+    # A cada 4 horas (UTC). Mantém o banco atualizado e o refresh token vivo.
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Backfill completo? (1 = sim, vazio = incremental)"
+        required: false
+        default: ""
+
+# Evita execuções concorrentes do sync.
+concurrency:
+  group: olist-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger sync endpoint
+        env:
+          BASE_URL: ${{ vars.OLIST_BASE_URL || 'https://olist-dash.vercel.app' }}
+          SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
+          FULL: ${{ github.event.inputs.full }}
+        run: |
+          URL="$BASE_URL/api/olist/sync"
+          if [ -n "$FULL" ]; then URL="$URL?full=1"; fi
+          echo "POST $URL"
+          curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 300 | tee /dev/stderr

@@ -6,6 +6,10 @@ import {
   OLIST_REFRESH_COOKIE,
   OLIST_STATE_COOKIE,
 } from "@/lib/olist-v3"
+import { hasDatabase } from "@/lib/db/client"
+import { saveCredentials } from "@/lib/db/credentials"
+
+export const runtime = "nodejs"
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -38,6 +42,16 @@ export async function GET(request: Request) {
 
   try {
     const token = await exchangeCodeForToken(request, code)
+
+    // Persiste o refresh token (cifrado) p/ o job de sync autenticar sem usuário. Best-effort.
+    if (hasDatabase()) {
+      try {
+        await saveCredentials(token)
+      } catch (e) {
+        console.error("Falha ao persistir credencial Olist no banco:", e)
+      }
+    }
+
     const response = redirectToDashboard(request, { olist: "connected" })
     const secure = new URL(request.url).protocol === "https:"
 
