@@ -8,6 +8,11 @@ import {
   OLIST_REFRESH_COOKIE,
 } from "@/lib/olist-v3"
 
+// Uma carga "a frio" pode fazer centenas de chamadas espaçadas pelo throttle e levar
+// alguns minutos. Garante o runtime Node e amplia o limite de execução da função.
+export const runtime = "nodejs"
+export const maxDuration = 300
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const periodo = url.searchParams.get("periodo") ?? "7d"

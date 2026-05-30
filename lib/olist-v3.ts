@@ -235,8 +235,51 @@ async function tokenRequest(params: Record<string, string>) {
   return (await response.json()) as TinyTokenResponse
 }
 
+type CacheEntry<T> = { value: T; expiresAt: number }
+
+// Cache server-side dos pedidos já montados, por (conta + período). Evita refazer a
+// cascata de ~440 chamadas a cada troca de período / recarga dentro da janela do TTL.
+const ORDERS_CACHE_TTL_MS = Number(process.env.OLIST_CACHE_TTL_MS) || 15 * 60_000
+const ordersCache = new Map<string, CacheEntry<Pedido[]>>()
+const ordersInFlight = new Map<string, Promise<Pedido[]>>()
+
+// Fingerprint curto e não-reversível do token: serve de chave de cache sem guardar o
+// token cru e separando contas distintas. (FNV-1a 32 bits.)
+function tokenFingerprint(token: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < token.length; i++) {
+    hash ^= token.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 export async function fetchTinyOrders(accessToken: string, period: string = "7d"): Promise<Pedido[]> {
-  const items = await fetchRecentOrderList(accessToken, normalizePeriod(period))
+  const normalized = normalizePeriod(period)
+  const key = `${tokenFingerprint(accessToken)}:${normalized}`
+
+  const hit = ordersCache.get(key)
+  if (hit && hit.expiresAt > Date.now()) return hit.value
+
+  // Dedup: requisições idênticas simultâneas compartilham a mesma cascata em voo.
+  const inflight = ordersInFlight.get(key)
+  if (inflight) return inflight
+
+  const promise = loadTinyOrders(accessToken, normalized)
+    .then((value) => {
+      ordersCache.set(key, { value, expiresAt: Date.now() + ORDERS_CACHE_TTL_MS })
+      return value
+    })
+    .finally(() => {
+      ordersInFlight.delete(key)
+    })
+
+  ordersInFlight.set(key, promise)
+  return promise
+}
+
+async function loadTinyOrders(accessToken: string, period: OrderPeriod): Promise<Pedido[]> {
+  const items = await fetchRecentOrderList(accessToken, period)
   const details = await mapWithConcurrency(items, 3, async (item) => {
     if (!item.id) return null
     try {
@@ -293,10 +336,49 @@ async function fetchRecentOrderList(accessToken: string, period: OrderPeriod) {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function tinyFetch<T>(accessToken: string, path: string, maxRetries = 3): Promise<T> {
+// --- Controle de taxa (o limite da Olist é por conta: 60/120/240 req/min conforme o plano) ---
+const RATE_LIMIT_PER_MIN = Number(process.env.OLIST_RATE_LIMIT_PER_MIN) || 60
+const MIN_REQUEST_INTERVAL_MS =
+  Number(process.env.OLIST_MIN_REQUEST_INTERVAL_MS) ||
+  Math.ceil(60_000 / (RATE_LIMIT_PER_MIN * 0.85)) // ~15% de folga abaixo do limite
+const MAX_RETRIES = Number(process.env.OLIST_MAX_RETRIES) || 5
+const BACKOFF_BASE_MS = 1500
+const BACKOFF_CAP_MS = 30_000
+
+// Portão serializado: garante um intervalo mínimo entre o INÍCIO de cada requisição,
+// independentemente da concorrência das etapas. Todas as chamadas à API passam por aqui,
+// então a taxa real de saída fica limitada pelo gate, não pelo `concurrency` das etapas.
+let rateGate: Promise<void> = Promise.resolve()
+let lastRequestStart = 0
+
+function acquireRateSlot(): Promise<void> {
+  rateGate = rateGate.then(async () => {
+    const wait = MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestStart)
+    if (wait > 0) await delay(wait)
+    lastRequestStart = Date.now()
+  })
+  return rateGate
+}
+
+function getRetryDelayMs(response: Response, attempt: number): number {
+  // Respeita o header Retry-After quando presente (segundos ou data HTTP).
+  const retryAfter = response.headers.get("retry-after")
+  if (retryAfter) {
+    const secs = Number(retryAfter)
+    if (Number.isFinite(secs)) return Math.min(secs * 1000, 60_000)
+    const at = Date.parse(retryAfter)
+    if (Number.isFinite(at)) return Math.min(Math.max(0, at - Date.now()), 60_000)
+  }
+  // Caso contrário, backoff exponencial com jitter.
+  const exp = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (attempt - 1))
+  return exp + Math.random() * 0.3 * exp
+}
+
+async function tinyFetch<T>(accessToken: string, path: string, maxRetries = MAX_RETRIES): Promise<T> {
   let attempt = 0
   while (true) {
     attempt++
+    await acquireRateSlot()
     const response = await fetch(`${OLIST_API_URL}${path}`, {
       headers: {
         Accept: "application/json",
@@ -306,8 +388,8 @@ async function tinyFetch<T>(accessToken: string, path: string, maxRetries = 3): 
     })
 
     if (!response.ok) {
-      if (response.status === 429 && attempt < maxRetries) {
-        await delay(attempt * 2000) // Backoff de 2s, 4s, etc.
+      if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
+        await delay(getRetryDelayMs(response, attempt))
         continue
       }
       const body = await response.text()
@@ -396,6 +478,24 @@ function mapOrderToPedido(
   }
 }
 
+// Custos de produto mudam raramente: cacheia por id e por sku atravessando
+// carregamentos e períodos, removendo o maior bloco de chamadas em cargas "quentes".
+// Só valores obtidos com sucesso são gravados (falhas não são cacheadas).
+const PRODUCT_COST_TTL_MS = Number(process.env.OLIST_PRODUCT_COST_TTL_MS) || 6 * 60 * 60_000
+const productCostById = new Map<number, CacheEntry<number>>()
+const productCostBySku = new Map<string, CacheEntry<number>>()
+
+function readCostCache<K>(map: Map<K, CacheEntry<number>>, key: K): number | undefined {
+  const hit = map.get(key)
+  if (hit && hit.expiresAt > Date.now()) return hit.value
+  if (hit) map.delete(key)
+  return undefined
+}
+
+function writeCostCache<K>(map: Map<K, CacheEntry<number>>, key: K, value: number): void {
+  map.set(key, { value, expiresAt: Date.now() + PRODUCT_COST_TTL_MS })
+}
+
 async function fetchProductCosts(
   accessToken: string,
   orders: TinyOrderDetail[],
@@ -403,7 +503,14 @@ async function fetchProductCosts(
   const refs = collectProductRefs(orders)
   const lookup: ProductCostLookup = { byId: new Map(), bySku: new Map() }
 
-  await mapWithConcurrency(refs.ids.slice(0, 120), 3, async (id) => {
+  const idsToFetch = refs.ids.filter((id) => {
+    const cached = readCostCache(productCostById, id)
+    if (cached === undefined) return true
+    lookup.byId.set(id, cached)
+    return false
+  })
+
+  await mapWithConcurrency(idsToFetch.slice(0, 120), 3, async (id) => {
     try {
       const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
       setProductCost(lookup, { id, sku: product.sku, cost: getProductCost(product) })
@@ -412,12 +519,20 @@ async function fetchProductCosts(
         const history = await tinyFetch<TinyProductCostList>(accessToken, `/produtos/${id}/custos?limit=1`)
         setProductCost(lookup, { id, sku: product.sku, cost: getProductCostFromHistory(history) })
       }
+      writeCostCache(productCostById, id, lookup.byId.get(id) ?? 0)
     } catch {
       lookup.byId.set(id, 0)
     }
   })
 
-  const missingSkus = refs.skus.filter((sku) => !lookup.bySku.has(sku))
+  const missingSkus = refs.skus.filter((sku) => {
+    if (lookup.bySku.has(sku)) return false
+    const cached = readCostCache(productCostBySku, sku)
+    if (cached === undefined) return true
+    lookup.bySku.set(sku, cached)
+    return false
+  })
+
   await mapWithConcurrency(missingSkus.slice(0, 120), 3, async (sku) => {
     try {
       const params = new URLSearchParams({ codigo: sku, limit: "1", situacao: "A" })
@@ -427,6 +542,7 @@ async function fetchProductCosts(
       )
       const product = list.itens?.[0]
       setProductCost(lookup, { id: product?.id, sku, cost: getProductCost(product) })
+      writeCostCache(productCostBySku, sku, lookup.bySku.get(sku) ?? 0)
     } catch {
       lookup.bySku.set(sku, 0)
     }
