@@ -237,73 +237,75 @@ async function tokenRequest(params: Record<string, string>) {
 
 type CacheEntry<T> = { value: T; expiresAt: number }
 
-// Cache server-side dos pedidos já montados, por (conta + período). Evita refazer a
-// cascata de ~440 chamadas a cada troca de período / recarga dentro da janela do TTL.
-const ORDERS_CACHE_TTL_MS = Number(process.env.OLIST_CACHE_TTL_MS) || 15 * 60_000
-const ordersCache = new Map<string, CacheEntry<Pedido[]>>()
-const ordersInFlight = new Map<string, Promise<Pedido[]>>()
+// ---------------------------------------------------------------------------
+// Sync para o banco: carrega pedidos de uma janela de datas, com detalhe completo.
+// (O dashboard não chama mais a Olist no page load — só o job de sync, em background.)
+// ---------------------------------------------------------------------------
 
-// Fingerprint curto e não-reversível do token: serve de chave de cache sem guardar o
-// token cru e separando contas distintas. (FNV-1a 32 bits.)
-function tokenFingerprint(token: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < token.length; i++) {
-    hash ^= token.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36)
+export type SyncOrder = {
+  pedido: Pedido
+  situacao?: number
+  detailLevel: "full" | "summary"
+  raw: TinyOrderDetail
 }
 
-export async function fetchTinyOrders(accessToken: string, period: string = "7d"): Promise<Pedido[]> {
-  const normalized = normalizePeriod(period)
-  const key = `${tokenFingerprint(accessToken)}:${normalized}`
+export async function loadOrdersForSync(
+  accessToken: string,
+  opts: { dataInicial: string; dataFinal: string; maxItems?: number; detailLimit?: number },
+): Promise<SyncOrder[]> {
+  const maxItems = opts.maxItems ?? 5000
+  const detailLimit = opts.detailLimit ?? Number.POSITIVE_INFINITY
+  const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
-  const hit = ordersCache.get(key)
-  if (hit && hit.expiresAt > Date.now()) return hit.value
-
-  // Dedup: requisições idênticas simultâneas compartilham a mesma cascata em voo.
-  const inflight = ordersInFlight.get(key)
-  if (inflight) return inflight
-
-  const promise = loadTinyOrders(accessToken, normalized)
-    .then((value) => {
-      ordersCache.set(key, { value, expiresAt: Date.now() + ORDERS_CACHE_TTL_MS })
-      return value
-    })
-    .finally(() => {
-      ordersInFlight.delete(key)
-    })
-
-  ordersInFlight.set(key, promise)
-  return promise
-}
-
-async function loadTinyOrders(accessToken: string, period: OrderPeriod): Promise<Pedido[]> {
-  const items = await fetchRecentOrderList(accessToken, period)
-  // A lista já vem por data desc: detalha só os ORDER_DETAIL_LIMIT pedidos mais recentes
-  // (1 chamada cada) e usa os próprios dados da lista para o restante, sem custo de API.
   const details = await mapWithConcurrency(items, 3, async (item, index) => {
     if (!item.id) return null
-    if (index >= ORDER_DETAIL_LIMIT) return itemToMinimalDetail(item)
+    if (index >= detailLimit) return { detail: itemToMinimalDetail(item), level: "summary" as const }
     try {
       const detail = await tinyFetch<TinyOrderDetail>(accessToken, `/pedidos/${item.id}`)
-      return mergeOrderListItemWithDetail(item, detail)
+      return { detail: mergeOrderListItemWithDetail(item, detail), level: "full" as const }
     } catch {
-      return itemToMinimalDetail(item)
+      return { detail: itemToMinimalDetail(item), level: "summary" as const }
     }
   })
 
-  const validDetails = details.filter((order): order is TinyOrderDetail => Boolean(order))
-  const productCosts = await fetchProductCosts(accessToken, validDetails)
-  const receivablePayments = await fetchReceivablePayments(accessToken, validDetails)
+  const valid = details.filter(
+    (d): d is { detail: TinyOrderDetail; level: "full" | "summary" } => Boolean(d),
+  )
+  const detailList = valid.map((d) => d.detail)
+  const productCosts = await fetchProductCosts(accessToken, detailList)
+  const receivablePayments = await fetchReceivablePayments(accessToken, detailList)
 
-  return validDetails
-    .map((order) => mapOrderToPedido(order, productCosts, receivablePayments))
-    .sort((a, b) => (a.data < b.data ? 1 : -1))
+  return valid.map(({ detail, level }) => ({
+    pedido: mapOrderToPedido(detail, productCosts, receivablePayments),
+    situacao: detail.situacao,
+    detailLevel: level,
+    raw: detail,
+  }))
 }
 
-async function fetchRecentOrderList(accessToken: string, period: OrderPeriod) {
-  const { dataInicial, dataFinal, maxItems } = getOrderDateRange(period)
+// Ponte entre o cache de custo em memória e a tabela product_costs (persiste entre
+// cold starts do serverless): o sync semeia antes de rodar e exporta os custos depois.
+export function primeProductCostCache(entries: Array<{ ref: string; custo: number }>) {
+  const expiresAt = Date.now() + PRODUCT_COST_TTL_MS
+  for (const { ref, custo } of entries) {
+    if (ref.startsWith("id:")) productCostById.set(Number(ref.slice(3)), { value: custo, expiresAt })
+    else if (ref.startsWith("sku:")) productCostBySku.set(ref.slice(4), { value: custo, expiresAt })
+  }
+}
+
+export function exportProductCostCache(): Array<{ ref: string; custo: number }> {
+  const out: Array<{ ref: string; custo: number }> = []
+  for (const [id, entry] of productCostById) out.push({ ref: `id:${id}`, custo: entry.value })
+  for (const [sku, entry] of productCostBySku) out.push({ ref: `sku:${sku}`, custo: entry.value })
+  return out
+}
+
+async function fetchOrderListRange(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<TinyOrderListItem[]> {
   const items: TinyOrderListItem[] = []
   const limit = 100
   let offset = 0
@@ -347,13 +349,6 @@ const MIN_REQUEST_INTERVAL_MS =
 const MAX_RETRIES = Number(process.env.OLIST_MAX_RETRIES) || 5
 const BACKOFF_BASE_MS = 1500
 const BACKOFF_CAP_MS = 30_000
-
-// Nº de pedidos (mais recentes) que recebem detalhe completo (produto, custo, frete,
-// forma de pagamento) — 1 chamada cada. O restante usa só os dados da lista, sem custo
-// de API. 0 = nenhum (modo resumo). Mantém a carga dentro do orçamento de taxa.
-const parsedDetailLimit = Number(process.env.OLIST_ORDER_DETAIL_LIMIT)
-const ORDER_DETAIL_LIMIT =
-  Number.isFinite(parsedDetailLimit) && parsedDetailLimit >= 0 ? parsedDetailLimit : 80
 
 // Cascatas auxiliares caras (centenas de chamadas) ficam desligadas por padrão:
 const FETCH_RECEIVABLE_DETAILS = process.env.OLIST_FETCH_RECEIVABLE_DETAILS === "true"
@@ -861,12 +856,12 @@ function getOrderPaymentKey(order: TinyOrderDetail) {
   return String(order.id ?? order.numeroPedido ?? "")
 }
 
-function normalizePeriod(period: string): OrderPeriod {
+export function normalizePeriod(period: string): OrderPeriod {
   if (period === "7d" || period === "15d" || period === "30d" || period === "tudo") return period
   return "7d"
 }
 
-function getOrderDateRange(period: OrderPeriod) {
+export function getOrderDateRange(period: OrderPeriod) {
   const daysByPeriod: Record<OrderPeriod, number> = {
     "7d": 7,
     "15d": 15,
