@@ -39,6 +39,7 @@ function rowToPedido(r: typeof orders.$inferSelect): Pedido {
     devolucao: Number(r.devolucao),
     taxaComissao: Number(r.taxaComissao),
     custoTotal: Number(r.custoTotal),
+    quantidade: Number(r.quantidade),
     statusPagamento: r.statusPagamento as StatusPagamento,
     data: r.data,
   }
@@ -59,6 +60,7 @@ const ordersConflictSet = {
   devolucao: sql`excluded.devolucao`,
   taxaComissao: sql`excluded.taxa_comissao`,
   custoTotal: sql`excluded.custo_total`,
+  quantidade: sql`excluded.quantidade`,
   data: sql`excluded.data`,
   situacao: sql`excluded.situacao`,
   detailLevel: sql`excluded.detail_level`,
@@ -85,6 +87,7 @@ export async function upsertOrders(items: SyncOrder[]): Promise<number> {
     devolucao: String(pedido.devolucao),
     taxaComissao: String(pedido.taxaComissao),
     custoTotal: String(pedido.custoTotal),
+    quantidade: pedido.quantidade,
     data: pedido.data,
     situacao: situacao ?? null,
     detailLevel,

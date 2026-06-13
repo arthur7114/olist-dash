@@ -18,12 +18,12 @@ import {
 
 const serieConfig = {
   faturamento: { label: "Faturamento", color: "var(--chart-1)" },
-  lucro: { label: "Lucro bruto", color: "var(--chart-3)" },
+  lucro: { label: "Margem contrib.", color: "var(--chart-3)" },
 } satisfies ChartConfig
 
 const canalConfig = {
   faturamento: { label: "Faturamento", color: "var(--chart-1)" },
-  lucroBruto: { label: "Lucro bruto", color: "var(--chart-2)" },
+  lucroBruto: { label: "Margem contrib.", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
 export function FaturamentoLucroChart({ pedidos }: { pedidos: Pedido[] }) {
@@ -32,7 +32,7 @@ export function FaturamentoLucroChart({ pedidos }: { pedidos: Pedido[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Faturamento e lucro por dia</CardTitle>
+        <CardTitle>Faturamento e M.C. por dia</CardTitle>
         <CardDescription>Evolução diária no período selecionado</CardDescription>
       </CardHeader>
       <CardContent>
@@ -63,7 +63,7 @@ export function FaturamentoLucroChart({ pedidos }: { pedidos: Pedido[] }) {
                   formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-3">
                       <span className="text-muted-foreground">
-                        {name === "faturamento" ? "Faturamento" : "Lucro bruto"}
+                        {name === "faturamento" ? "Faturamento" : "Margem contrib."}
                       </span>
                       <span className="font-medium tabular-nums">{formatBRLCompacto(Number(value))}</span>
                     </div>
@@ -103,7 +103,7 @@ export function CanalBarChart({ pedidos }: { pedidos: Pedido[] }) {
     <Card>
       <CardHeader>
         <CardTitle>Comparativo por canal</CardTitle>
-        <CardDescription>Faturamento e lucro bruto por canal de venda</CardDescription>
+        <CardDescription>Faturamento e margem de contribuição por canal de venda</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={canalConfig} className="aspect-auto h-[280px] w-full">
@@ -123,7 +123,7 @@ export function CanalBarChart({ pedidos }: { pedidos: Pedido[] }) {
                   formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-3">
                       <span className="text-muted-foreground">
-                        {name === "faturamento" ? "Faturamento" : "Lucro bruto"}
+                        {name === "faturamento" ? "Faturamento" : "Margem contrib."}
                       </span>
                       <span className="font-medium tabular-nums">{formatBRLCompacto(Number(value))}</span>
                     </div>
