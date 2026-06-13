@@ -316,6 +316,22 @@ export async function syncOrdersIncremental(
   return { processed, listed: items.length, completed }
 }
 
+// Recalcula custo e quantidade a partir de detalhes de pedido JÁ salvos (coluna `raw`),
+// sem rebuscar os pedidos na Olist — só os custos de produto (cache-first; busca na Olist
+// apenas os que faltam). Usado pelo job de recálculo para corrigir custos antigos zerados.
+export async function recomputeCostsForRaws(
+  accessToken: string,
+  raws: unknown[],
+): Promise<Array<{ custoTotal: number; quantidade: number }>> {
+  const details = raws as TinyOrderDetail[]
+  const productCosts = await fetchProductCosts(accessToken, details)
+  const noPayments = new Map<string, string>()
+  return details.map((detail) => {
+    const pedido = mapOrderToPedido(detail, productCosts, noPayments)
+    return { custoTotal: pedido.custoTotal, quantidade: pedido.quantidade }
+  })
+}
+
 // Ponte entre o cache de custo em memória e a tabela product_costs (persiste entre
 // cold starts do serverless): o sync semeia antes de rodar e exporta os custos depois.
 export function primeProductCostCache(entries: Array<{ ref: string; custo: number }>) {
