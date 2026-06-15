@@ -1,4 +1,4 @@
-import { and, desc, gte, lte, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm"
 import { getDb } from "./client"
 import { orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
@@ -12,6 +12,28 @@ export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> 
     .where(gte(orders.data, dataInicial))
     .orderBy(desc(orders.data))
   return rows.map(rowToPedido)
+}
+
+// Pedidos com custo zerado (mas com venda) e detalhe salvo — alvo do recálculo de custos.
+// Ordena do mais antigo p/ o mais novo (os antigos é que ficaram sem custo). raw traz o
+// detalhe completo da Olist, então dá p/ recalcular o custo sem rebuscar o pedido.
+export async function getOrdersMissingCost(limit: number): Promise<Array<{ olistId: string; raw: unknown }>> {
+  const db = getDb()
+  return db
+    .select({ olistId: orders.olistId, raw: orders.raw })
+    .from(orders)
+    .where(sql`${orders.custoTotal} = 0 and ${orders.valorVenda} > 0 and ${orders.raw} is not null`)
+    .orderBy(asc(orders.data))
+    .limit(limit)
+}
+
+// Atualiza só custo + quantidade de um pedido (usado pelo recálculo).
+export async function updateOrderCost(olistId: string, custoTotal: number, quantidade: number): Promise<void> {
+  const db = getDb()
+  await db
+    .update(orders)
+    .set({ custoTotal: String(custoTotal), quantidade, updatedAt: new Date() })
+    .where(eq(orders.olistId, olistId))
 }
 
 // IDs de pedidos já no banco numa janela — usado para o backfill pular o que já foi sincronizado.
@@ -39,6 +61,7 @@ function rowToPedido(r: typeof orders.$inferSelect): Pedido {
     devolucao: Number(r.devolucao),
     taxaComissao: Number(r.taxaComissao),
     custoTotal: Number(r.custoTotal),
+    quantidade: Number(r.quantidade),
     statusPagamento: r.statusPagamento as StatusPagamento,
     data: r.data,
   }
@@ -59,6 +82,7 @@ const ordersConflictSet = {
   devolucao: sql`excluded.devolucao`,
   taxaComissao: sql`excluded.taxa_comissao`,
   custoTotal: sql`excluded.custo_total`,
+  quantidade: sql`excluded.quantidade`,
   data: sql`excluded.data`,
   situacao: sql`excluded.situacao`,
   detailLevel: sql`excluded.detail_level`,
@@ -85,6 +109,7 @@ export async function upsertOrders(items: SyncOrder[]): Promise<number> {
     devolucao: String(pedido.devolucao),
     taxaComissao: String(pedido.taxaComissao),
     custoTotal: String(pedido.custoTotal),
+    quantidade: pedido.quantidade,
     data: pedido.data,
     situacao: situacao ?? null,
     detailLevel,

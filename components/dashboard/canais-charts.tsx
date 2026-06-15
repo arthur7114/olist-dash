@@ -4,6 +4,7 @@ import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import {
+  agregarPorCanal,
   agregarPorCanalVendedor,
   formatBRLCompacto,
   formatPercent,
@@ -15,7 +16,7 @@ const ticketConfig = {
 } satisfies ChartConfig
 
 const margemConfig = {
-  margem: { label: "Margem", color: "var(--chart-2)" },
+  margem: { label: "M.C.", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
 export function TicketPorCanalChart({ pedidos }: { pedidos: Pedido[] }) {
@@ -53,23 +54,25 @@ export function TicketPorCanalChart({ pedidos }: { pedidos: Pedido[] }) {
   )
 }
 
-export function MargemVendedorChart({ pedidos }: { pedidos: Pedido[] }) {
-  const dados = agregarPorCanalVendedor(pedidos)
-    .filter((l) => l.canal === "Vendedor interno" || l.canal === "Vendedor externo")
-    .map((l) => ({ vendedor: l.vendedor.split(" ")[0], margem: Math.round(l.margem * 1000) / 1000 }))
+export function MargemCanalChart({ pedidos }: { pedidos: Pedido[] }) {
+  const dados = agregarPorCanal(pedidos)
+    .map((c) => ({
+      canal: c.canal.replace("Vendedor ", "Vend. "),
+      margem: c.faturamento ? Math.round((c.lucroBruto / c.faturamento) * 1000) / 1000 : 0,
+    }))
     .sort((a, b) => b.margem - a.margem)
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Margem por vendedor</CardTitle>
-        <CardDescription>Margem percentual praticada por cada vendedor</CardDescription>
+        <CardTitle>Margem de contribuição por canal</CardTitle>
+        <CardDescription>M.C. percentual praticada em cada canal</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={margemConfig} className="aspect-auto h-[260px] w-full">
           <BarChart data={dados} margin={{ left: 4, right: 8, top: 8 }}>
             <CartesianGrid vertical={false} />
-            <XAxis dataKey="vendedor" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} />
+            <XAxis dataKey="canal" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} interval={0} />
             <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v) => formatPercent(Number(v), 0)} />
             <ChartTooltip
               content={<ChartTooltipContent formatter={(v) => <span className="font-medium">{formatPercent(Number(v))}</span>} />}

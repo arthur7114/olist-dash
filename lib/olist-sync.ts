@@ -1,12 +1,13 @@
 import {
   exportProductCostCache,
   primeProductCostCache,
+  recomputeCostsForRaws,
   refreshAccessToken,
   syncOrdersIncremental,
 } from "@/lib/olist-v3"
 import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
 import { saveSyncState } from "@/lib/db/syncState"
-import { getExistingOrderIds, upsertOrders } from "@/lib/db/orders"
+import { getExistingOrderIds, getOrdersMissingCost, updateOrderCost, upsertOrders } from "@/lib/db/orders"
 import { getAllProductCosts, saveProductCosts } from "@/lib/db/productCosts"
 
 export type SyncSummary = {
@@ -99,6 +100,69 @@ export async function runSync(opts: { full?: boolean } = {}): Promise<SyncSummar
     backfillDays: BACKFILL_DAYS,
     recentCompleted: recent.completed,
     backfillDone,
+    elapsedMs: Date.now() - startedAt,
+  }
+}
+
+export type RecomputeSummary = {
+  ok: true
+  totalMissing: number
+  scanned: number
+  updated: number
+  remaining: number
+  completed: boolean
+  elapsedMs: number
+}
+
+// Recalcula o custo de pedidos com custoTotal=0 a partir do detalhe já salvo (`raw`),
+// usando o cache de custos (rápido) e buscando na Olist só os que faltam. Resumível: cada
+// execução processa o que couber no orçamento de tempo; rode de novo até `completed=true`.
+export async function runRecomputeCosts(): Promise<RecomputeSummary> {
+  const startedAt = Date.now()
+  const deadline = startedAt + BUDGET_MS
+
+  const creds = await getStoredCredentials()
+  if (!creds) throw new Error("Sem credenciais Olist no banco. Conecte a conta pelo dashboard primeiro.")
+  const refreshed = await refreshAccessToken(creds.refreshToken)
+  await saveCredentials(refreshed)
+  const accessToken = refreshed.access_token
+
+  // Semeia o cache de custo do banco — a maioria dos custos antigos já está aqui.
+  primeProductCostCache(await getAllProductCosts())
+
+  const all = await getOrdersMissingCost(3000)
+  let scanned = 0
+  let updated = 0
+  let completed = true
+  const CHUNK = 100
+
+  for (let i = 0; i < all.length; i += CHUNK) {
+    if (Date.now() >= deadline) {
+      completed = false
+      break
+    }
+    const slice = all.slice(i, i + CHUNK)
+    const recomputed = await recomputeCostsForRaws(accessToken, slice.map((r) => r.raw))
+    for (let j = 0; j < slice.length; j++) {
+      scanned += 1
+      const rc = recomputed[j]
+      if (rc && rc.custoTotal > 0) {
+        await updateOrderCost(slice[j].olistId, rc.custoTotal, rc.quantidade)
+        updated += 1
+      }
+    }
+  }
+
+  // Persiste custos recém-descobertos para acelerar as próximas execuções.
+  await saveProductCosts(exportProductCostCache())
+
+  return {
+    ok: true,
+    totalMissing: all.length,
+    scanned,
+    updated,
+    remaining: all.length - scanned,
+    completed,
     elapsedMs: Date.now() - startedAt,
   }
 }

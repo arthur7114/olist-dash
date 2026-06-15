@@ -3,7 +3,7 @@
 import { PageTitle } from "@/components/dashboard/page-title"
 import { GlobalFilters } from "@/components/dashboard/global-filters"
 import { CanalBarChart } from "@/components/dashboard/overview-charts"
-import { MargemVendedorChart, TicketPorCanalChart } from "@/components/dashboard/canais-charts"
+import { MargemCanalChart, TicketPorCanalChart } from "@/components/dashboard/canais-charts"
 import { Card } from "@/components/ui/card"
 import {
   Table,
@@ -36,7 +36,7 @@ export default function CanaisPage() {
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <MargemVendedorChart pedidos={pedidosFiltrados} />
+        <MargemCanalChart pedidos={pedidosFiltrados} />
 
         <Card className="gap-0 overflow-hidden p-0">
           <div className="border-b border-border p-4">
@@ -51,10 +51,9 @@ export default function CanaisPage() {
                   <TableHead>Vendedor</TableHead>
                   <TableHead className="text-right">Vendas</TableHead>
                   <TableHead className="text-right">Ticket médio</TableHead>
-                  <TableHead className="text-right">Comissão</TableHead>
-                  <TableHead className="text-right">Taxa ML</TableHead>
-                  <TableHead className="text-right">% Margem</TableHead>
-                  <TableHead className="text-right">Lucro bruto</TableHead>
+                  <TableHead className="text-right">Taxa marketplace</TableHead>
+                  <TableHead className="text-right">% M.C.</TableHead>
+                  <TableHead className="text-right">M.C. (R$)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -65,10 +64,7 @@ export default function CanaisPage() {
                     <TableCell className="text-right tabular-nums">{formatNumero(l.quantidadeVendas)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatBRL(l.ticketMedio)}</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {l.comissao > 0 ? formatBRL(l.comissao) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {l.taxa > 0 ? formatBRL(l.taxa) : "—"}
+                      {l.taxaMarketplace > 0 ? formatBRL(l.taxaMarketplace) : "—"}
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -83,7 +79,7 @@ export default function CanaisPage() {
                 ))}
                 {linhas.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                       Nenhum dado para os filtros selecionados.
                     </TableCell>
                   </TableRow>

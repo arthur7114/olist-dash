@@ -18,6 +18,7 @@ export const orders = pgTable(
     devolucao: numeric("devolucao", { precision: 14, scale: 2 }).notNull().default("0"),
     taxaComissao: numeric("taxa_comissao", { precision: 14, scale: 2 }).notNull().default("0"),
     custoTotal: numeric("custo_total", { precision: 14, scale: 2 }).notNull().default("0"),
+    quantidade: integer("quantidade").notNull().default(1),
     data: date("data").notNull(),
     situacao: integer("situacao"),
     detailLevel: text("detail_level").notNull().default("summary"),

@@ -9,6 +9,7 @@ import {
   Receipt,
   Percent,
   Layers,
+  AlertTriangle,
 } from "lucide-react"
 import { PageTitle } from "@/components/dashboard/page-title"
 import { GlobalFilters } from "@/components/dashboard/global-filters"
@@ -26,9 +27,9 @@ export default function VisaoGeralPage() {
     { titulo: "Quantidade de pedidos", valor: formatNumero(kpi.quantidadePedidos), icone: ShoppingCart, variacao: 0.061, destaque: "default" as const, legenda: "pedidos no período" },
     { titulo: "Valor total de frete", valor: formatBRL(kpi.totalFrete), icone: Truck, variacao: 0.028, destaque: "default" as const, legenda: "custo logístico" },
     { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: -0.043, destaque: "alerta" as const, legenda: "vs. período anterior" },
-    { titulo: "Lucro bruto", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: 0.097, destaque: "positivo" as const, legenda: "após custos e taxas" },
+    { titulo: "Margem de contribuição", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: 0.097, destaque: "positivo" as const, legenda: "receita − custos/taxas variáveis" },
     { titulo: "Ticket médio", valor: formatBRL(kpi.ticketMedio), icone: Receipt, variacao: 0.035, destaque: "default" as const, legenda: "por pedido" },
-    { titulo: "Margem média", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: 0.018, destaque: "positivo" as const, legenda: "lucro / faturamento" },
+    { titulo: "Margem de contribuição %", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: 0.018, destaque: "positivo" as const, legenda: "M.C. / receita líquida" },
     { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: 0.012, destaque: "default" as const, legenda: "venda / custo" },
   ]
 
@@ -46,6 +47,16 @@ export default function VisaoGeralPage() {
           <KpiCard key={c.titulo} {...c} />
         ))}
       </section>
+
+      {kpi.pedidosSemCusto > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {formatNumero(kpi.pedidosSemCusto)} pedido(s) sem custo de produto cadastrado — a
+            margem de contribuição pode estar otimista nesses casos.
+          </span>
+        </div>
+      )}
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <FaturamentoLucroChart pedidos={pedidosFiltrados} />

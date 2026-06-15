@@ -76,8 +76,8 @@ export default function CurvaABCPage() {
                 <TableHead className="text-right">Qtd. vendida</TableHead>
                 <TableHead className="text-right">Valor vendido</TableHead>
                 <TableHead className="text-right">Custo médio</TableHead>
-                <TableHead className="text-right">Margem</TableHead>
-                <TableHead className="text-right">Lucro bruto</TableHead>
+                <TableHead className="text-right">% M.C.</TableHead>
+                <TableHead className="text-right">M.C. (R$)</TableHead>
                 <TableHead className="text-right">Markup</TableHead>
                 <TableHead className="text-right">% Acum.</TableHead>
               </TableRow>

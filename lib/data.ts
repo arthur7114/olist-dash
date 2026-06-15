@@ -32,8 +32,9 @@ export interface Pedido {
   valorVenda: number
   valorFrete: number
   devolucao: number
-  taxaComissao: number // taxa/comissão em R$ aplicada (ML, vendedores)
+  taxaComissao: number // taxa/comissão em R$ aplicada (ML, vendedores); 0 = não capturado da Olist
   custoTotal: number // custo dos produtos vendidos
+  quantidade: number // qtd total de itens do pedido
   statusPagamento: StatusPagamento
   data: string // ISO date
 }
@@ -150,6 +151,7 @@ function gerarPedidos(): Pedido[] {
       devolucao,
       taxaComissao,
       custoTotal,
+      quantidade,
       statusPagamento: status,
       data: data.toISOString().slice(0, 10),
     })
@@ -164,42 +166,83 @@ export const PEDIDOS: Pedido[] = gerarPedidos()
 // Regras de cálculo
 // ----------------------------------------------------------------------------
 
+// % de comissão por canal — fallback usado quando a Olist NÃO traz o valor real da
+// tarifa no pedido (o valor exato costuma vir só no Repasse, no mês seguinte).
+// Vendas locais e canais não listados = 0%. Ajuste conforme seu plano/categoria.
+// Override opcional em build via NEXT_PUBLIC_COMISSAO_ML / NEXT_PUBLIC_COMISSAO_SHOPEE.
+function pctEnv(value: string | undefined, fallback: number): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
+const COMISSAO_POR_CANAL: { match: string; taxa: number }[] = [
+  { match: "mercado livre", taxa: pctEnv(process.env.NEXT_PUBLIC_COMISSAO_ML, 0.16) },
+  { match: "mercadolivre", taxa: pctEnv(process.env.NEXT_PUBLIC_COMISSAO_ML, 0.16) },
+  { match: "shopee", taxa: pctEnv(process.env.NEXT_PUBLIC_COMISSAO_SHOPEE, 0.2) },
+]
+
+function comissaoEstimada(p: Pedido): number {
+  const canal = p.canal.toLowerCase()
+  const regra = COMISSAO_POR_CANAL.find((r) => canal.includes(r.match))
+  if (!regra) return 0
+  return Math.round(p.valorVenda * regra.taxa * 100) / 100
+}
+
+// Taxa/comissão efetiva do pedido: usa o valor real da Olist quando houver (>0);
+// senão cai para a estimativa por canal. Garante que a M.C. nunca fique
+// superestimada por falta da tarifa do marketplace.
+export function taxaComissaoEfetiva(p: Pedido): number {
+  return p.taxaComissao > 0 ? p.taxaComissao : comissaoEstimada(p)
+}
+
+// Margem de contribuição do pedido (R$): receita − custos/despesas variáveis
+// (CMV + frete + devolução + comissão/taxa de marketplace).
+// NB: o nome `lucroBruto` é mantido internamente, mas conceitualmente isto é a M.C.
 export function lucroBrutoPedido(p: Pedido): number {
-  return p.valorVenda - p.custoTotal - p.valorFrete - p.devolucao - p.taxaComissao
+  return p.valorVenda - p.custoTotal - p.valorFrete - p.devolucao - taxaComissaoEfetiva(p)
 }
 
 export interface KPIs {
   faturamentoBruto: number
+  faturamentoLiquido: number // bruto − devoluções (base da margem)
   quantidadePedidos: number
   totalFrete: number
   totalDevolucoes: number
-  lucroBruto: number
+  totalComissao: number // soma das taxas/comissões efetivas
+  lucroBruto: number // = margem de contribuição (R$)
   ticketMedio: number
-  margemMedia: number
+  margemMedia: number // = margem de contribuição (%) sobre a receita líquida
   markupMedio: number
+  pedidosSemCusto: number // pedidos com venda > 0 e custo 0 (M.C. otimista nesses)
 }
 
 export function calcularKPIs(pedidos: Pedido[]): KPIs {
   const faturamentoBruto = pedidos.reduce((s, p) => s + p.valorVenda, 0)
   const totalFrete = pedidos.reduce((s, p) => s + p.valorFrete, 0)
   const totalDevolucoes = pedidos.reduce((s, p) => s + p.devolucao, 0)
+  const totalComissao = pedidos.reduce((s, p) => s + taxaComissaoEfetiva(p), 0)
   const custoTotal = pedidos.reduce((s, p) => s + p.custoTotal, 0)
   const lucroBruto = pedidos.reduce((s, p) => s + lucroBrutoPedido(p), 0)
   const quantidadePedidos = pedidos.length
+  const pedidosSemCusto = pedidos.filter((p) => p.valorVenda > 0 && p.custoTotal === 0).length
 
+  const faturamentoLiquido = faturamentoBruto - totalDevolucoes
   const ticketMedio = quantidadePedidos ? faturamentoBruto / quantidadePedidos : 0
-  const margemMedia = faturamentoBruto ? lucroBruto / faturamentoBruto : 0
+  const margemMedia = faturamentoLiquido ? lucroBruto / faturamentoLiquido : 0
   const markupMedio = custoTotal ? faturamentoBruto / custoTotal : 0
 
   return {
     faturamentoBruto,
+    faturamentoLiquido,
     quantidadePedidos,
     totalFrete,
     totalDevolucoes,
+    totalComissao,
     lucroBruto,
     ticketMedio,
     margemMedia,
     markupMedio,
+    pedidosSemCusto,
   }
 }
 
@@ -231,46 +274,46 @@ export interface LinhaCanalVendedor {
   quantidadeVendas: number
   faturamento: number
   ticketMedio: number
-  comissao: number // soma de comissões (vendedores)
-  taxa: number // soma de taxas (Mercado Livre)
-  margem: number
-  lucroBruto: number
+  taxaMarketplace: number // soma das taxas/comissões efetivas (ML, Shopee, etc.)
+  margem: number // M.C. % sobre a receita líquida
+  lucroBruto: number // M.C. (R$)
 }
 
 export function agregarPorCanalVendedor(pedidos: Pedido[]): LinhaCanalVendedor[] {
-  const mapa = new Map<string, LinhaCanalVendedor>()
+  const mapa = new Map<string, LinhaCanalVendedor & { devolucoes: number }>()
   for (const p of pedidos) {
     const chave = `${p.canal}|${p.vendedor}`
-    const ehVendedor = p.canal === "Vendedor interno" || p.canal === "Vendedor externo"
-    const ehML = p.canal === "Mercado Livre"
     const atual =
       mapa.get(chave) ??
-      ({
+      {
         canal: p.canal,
         vendedor: p.vendedor,
         quantidadeVendas: 0,
         faturamento: 0,
         ticketMedio: 0,
-        comissao: 0,
-        taxa: 0,
+        taxaMarketplace: 0,
         margem: 0,
         lucroBruto: 0,
-      } as LinhaCanalVendedor)
+        devolucoes: 0,
+      }
 
     atual.quantidadeVendas += 1
     atual.faturamento += p.valorVenda
     atual.lucroBruto += lucroBrutoPedido(p)
-    if (ehVendedor) atual.comissao += p.taxaComissao
-    if (ehML) atual.taxa += p.taxaComissao
+    atual.taxaMarketplace += taxaComissaoEfetiva(p)
+    atual.devolucoes += p.devolucao
     mapa.set(chave, atual)
   }
 
   return Array.from(mapa.values())
-    .map((l) => ({
-      ...l,
-      ticketMedio: l.quantidadeVendas ? l.faturamento / l.quantidadeVendas : 0,
-      margem: l.faturamento ? l.lucroBruto / l.faturamento : 0,
-    }))
+    .map(({ devolucoes, ...l }) => {
+      const receitaLiquida = l.faturamento - devolucoes
+      return {
+        ...l,
+        ticketMedio: l.quantidadeVendas ? l.faturamento / l.quantidadeVendas : 0,
+        margem: receitaLiquida ? l.lucroBruto / receitaLiquida : 0,
+      }
+    })
     .sort((a, b) => b.faturamento - a.faturamento)
 }
 
@@ -320,19 +363,17 @@ export interface LinhaABC {
 export function calcularCurvaABC(pedidos: Pedido[]): LinhaABC[] {
   const mapa = new Map<
     string,
-    { sku: string; produto: string; quantidade: number; valor: number; custo: number; lucro: number }
+    { sku: string; produto: string; quantidade: number; valor: number; custo: number; lucro: number; devolucoes: number }
   >()
 
-  // quantidade aproximada por valor (mock): usamos número de itens via valorVenda/custo
   for (const p of pedidos) {
-    const produtoBase = PRODUTOS.find((x) => x.sku === p.sku)
-    const custoMedio = produtoBase?.custoMedio ?? 0
-    const quantidade = custoMedio ? Math.max(1, Math.round(p.custoTotal / custoMedio)) : 1
-    const atual = mapa.get(p.sku) ?? { sku: p.sku, produto: p.produto, quantidade: 0, valor: 0, custo: 0, lucro: 0 }
-    atual.quantidade += quantidade
+    const atual =
+      mapa.get(p.sku) ?? { sku: p.sku, produto: p.produto, quantidade: 0, valor: 0, custo: 0, lucro: 0, devolucoes: 0 }
+    atual.quantidade += Math.max(1, p.quantidade) // qtd real do pedido (somada por SKU)
     atual.valor += p.valorVenda
     atual.custo += p.custoTotal
     atual.lucro += lucroBrutoPedido(p)
+    atual.devolucoes += p.devolucao
     mapa.set(p.sku, atual)
   }
 
@@ -348,6 +389,7 @@ export function calcularCurvaABC(pedidos: Pedido[]): LinhaABC[] {
     else if (acumulado <= 0.95) classe = "B"
 
     const custoUnit = x.quantidade ? x.custo / x.quantidade : 0
+    const receitaLiquida = x.valor - x.devolucoes
     return {
       classe,
       sku: x.sku,
@@ -356,7 +398,7 @@ export function calcularCurvaABC(pedidos: Pedido[]): LinhaABC[] {
       valorVendido: x.valor,
       custoMedio: custoUnit,
       custoTotal: x.custo,
-      margem: x.valor ? x.lucro / x.valor : 0,
+      margem: receitaLiquida ? x.lucro / receitaLiquida : 0,
       lucroBruto: x.lucro,
       markup: x.custo ? x.valor / x.custo : 0,
       participacao,

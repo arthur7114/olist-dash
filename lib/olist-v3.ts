@@ -65,6 +65,7 @@ type TinyOrderDetail = TinyOrderListItem & {
   valorTotalPedido?: number
   valorFrete?: number
   valorDesconto?: number
+  valorOutrasDespesas?: number // onde a tarifa/comissão do marketplace cai quando importada como despesa
   situacao?: number
   ecommerce?: TinyOrderListItem["ecommerce"]
   intermediador?: {
@@ -315,6 +316,22 @@ export async function syncOrdersIncremental(
   return { processed, listed: items.length, completed }
 }
 
+// Recalcula custo e quantidade a partir de detalhes de pedido JÁ salvos (coluna `raw`),
+// sem rebuscar os pedidos na Olist — só os custos de produto (cache-first; busca na Olist
+// apenas os que faltam). Usado pelo job de recálculo para corrigir custos antigos zerados.
+export async function recomputeCostsForRaws(
+  accessToken: string,
+  raws: unknown[],
+): Promise<Array<{ custoTotal: number; quantidade: number }>> {
+  const details = raws as TinyOrderDetail[]
+  const productCosts = await fetchProductCosts(accessToken, details)
+  const noPayments = new Map<string, string>()
+  return details.map((detail) => {
+    const pedido = mapOrderToPedido(detail, productCosts, noPayments)
+    return { custoTotal: pedido.custoTotal, quantidade: pedido.quantidade }
+  })
+}
+
 // Ponte entre o cache de custo em memória e a tabela product_costs (persiste entre
 // cold starts do serverless): o sync semeia antes de rodar e exporta os custos depois.
 export function primeProductCostCache(entries: Array<{ ref: string; custo: number }>) {
@@ -385,6 +402,9 @@ const BACKOFF_CAP_MS = 30_000
 // Cascatas auxiliares caras (centenas de chamadas) ficam desligadas por padrão:
 const FETCH_RECEIVABLE_DETAILS = process.env.OLIST_FETCH_RECEIVABLE_DETAILS === "true"
 const DEEP_PRODUCT_COST = process.env.OLIST_DEEP_PRODUCT_COST === "true"
+// Fallback de custo por SKU (rede de segurança contra custo 0). Ligado por padrão; é
+// limitado (slice/cache) e bem mais barato que o deep cost histórico. Desligue com =false.
+const PRODUCT_COST_SKU_FALLBACK = process.env.OLIST_PRODUCT_COST_SKU_FALLBACK !== "false"
 
 // Portão serializado: garante um intervalo mínimo entre o INÍCIO de cada requisição,
 // independentemente da concorrência das etapas. Todas as chamadas à API passam por aqui,
@@ -498,6 +518,7 @@ function mapOrderToPedido(
     return sum + custoMedio * Math.max(1, toNumber(item.quantidade))
   }, 0)
   const devolucao = order.situacao === 2 ? valorVenda : 0
+  const quantidade = itens.reduce((sum, item) => sum + Math.max(1, toNumber(item.quantidade)), 0)
   const sufixoProduto = itens.length > 1 ? ` + ${itens.length - 1} item(ns)` : ""
 
   return {
@@ -512,11 +533,22 @@ function mapOrderToPedido(
     valorVenda: roundMoney(valorVenda),
     valorFrete: roundMoney(toNumber(order.valorFrete)),
     devolucao: roundMoney(devolucao),
-    taxaComissao: 0,
+    // Tarifa/comissão real quando a Olist a traz no pedido; senão 0 (o cálculo da M.C.
+    // aplica a estimativa por canal em tempo de leitura — ver taxaComissaoEfetiva).
+    taxaComissao: roundMoney(getOlistFee(order)),
     custoTotal: roundMoney(custoTotal),
+    quantidade: Math.max(1, quantidade),
     statusPagamento: getStatusPagamento(order),
     data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
   }
+}
+
+// Valor real da tarifa/comissão do marketplace, quando presente no detalhe do pedido.
+// ⚠️ O campo só vem preenchido se a integração do canal estiver com "importar tarifas
+// como despesa" ligada; o valor exato costuma chegar no Repasse (mês seguinte). Confirme
+// o caminho inspecionando uma amostra real de `orders.raw`. Retorna 0 quando ausente.
+function getOlistFee(order: TinyOrderDetail): number {
+  return toNumber(order.valorOutrasDespesas)
 }
 
 // Custos de produto mudam raramente: cacheia por id e por sku atravessando
@@ -566,8 +598,8 @@ async function fetchProductCosts(
     }
   })
 
-  // Busca por SKU (fallback) só com OLIST_DEEP_PRODUCT_COST=true — pode somar muitas chamadas.
-  if (!DEEP_PRODUCT_COST) return lookup
+  // Busca por SKU (fallback) — ligada por padrão como rede de segurança contra custo 0.
+  if (!PRODUCT_COST_SKU_FALLBACK) return lookup
 
   const missingSkus = refs.skus.filter((sku) => {
     if (lookup.bySku.has(sku)) return false
