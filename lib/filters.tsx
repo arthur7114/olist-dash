@@ -13,10 +13,17 @@ import {
   type Produto,
 } from "@/lib/data"
 
-export type PeriodoOpcao = "7d" | "15d" | "30d" | "tudo"
+export type PeriodoOpcao = "7d" | "15d" | "30d" | "tudo" | "custom"
+
+// datas em ISO (YYYY-MM-DD), mesmo formato usado pela API e pelo banco
+export interface IntervaloCustom {
+  inicio: string
+  fim: string
+}
 
 export interface FiltrosState {
   periodo: PeriodoOpcao
+  intervalo: IntervaloCustom | null
   canal: Canal | "todos"
   vendedor: string | "todos"
   sku: string | "todos"
@@ -26,6 +33,7 @@ export interface FiltrosState {
 interface FiltrosContextValue {
   filtros: FiltrosState
   setFiltro: <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => void
+  definirIntervalo: (inicio: Date, fim: Date) => void
   limpar: () => void
   pedidosFiltrados: Pedido[]
   totalSemFiltro: number
@@ -43,6 +51,7 @@ interface FiltrosContextValue {
 
 const padrao: FiltrosState = {
   periodo: "30d",
+  intervalo: null,
   canal: "todos",
   vendedor: "todos",
   sku: "todos",
@@ -51,15 +60,9 @@ const padrao: FiltrosState = {
 
 const FiltrosContext = createContext<FiltrosContextValue | null>(null)
 
-const DIAS_PERIODO: Record<PeriodoOpcao, number | null> = {
-  "7d": 7,
-  "15d": 15,
-  "30d": 30,
-  tudo: null,
+function paraIso(data: Date): string {
+  return data.toISOString().slice(0, 10)
 }
-
-// data de referência fixa do mock
-const HOJE = new Date("2026-05-30")
 
 export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [filtros, setFiltros] = useState<FiltrosState>(padrao)
@@ -70,12 +73,22 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [mensagemDados, setMensagemDados] = useState<string>()
 
   useEffect(() => {
+    // período "custom" selecionado mas sem intervalo definido ainda (usuário está escolhendo as datas)
+    if (filtros.periodo === "custom" && !filtros.intervalo) return
+
     let ativo = true
 
     async function carregarPedidos() {
       setCarregando(true)
       try {
-        const response = await fetch(`/api/olist/orders?periodo=${filtros.periodo}`, { cache: "no-store" })
+        const params = new URLSearchParams()
+        if (filtros.periodo === "custom" && filtros.intervalo) {
+          params.set("inicio", filtros.intervalo.inicio)
+          params.set("fim", filtros.intervalo.fim)
+        } else {
+          params.set("periodo", filtros.periodo)
+        }
+        const response = await fetch(`/api/olist/orders?${params.toString()}`, { cache: "no-store" })
         const data = (await response.json()) as {
           source?: "mock" | "real"
           authenticated?: boolean
@@ -104,7 +117,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     return () => {
       ativo = false
     }
-  }, [filtros.periodo])
+  }, [filtros.periodo, filtros.intervalo])
 
   const setFiltro = <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => {
     setFiltros((prev) => {
@@ -115,17 +128,17 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  // usado pelo date range picker: define o intervalo e já muda o período para "custom" numa só atualização
+  const definirIntervalo = (inicio: Date, fim: Date) => {
+    setFiltros((prev) => ({ ...prev, periodo: "custom", intervalo: { inicio: paraIso(inicio), fim: paraIso(fim) } }))
+  }
+
   const limpar = () => setFiltros(padrao)
 
+  // a janela de datas já vem filtrada do servidor (inclusive para o intervalo personalizado);
+  // aqui só sobram os filtros complementares (canal, vendedor, SKU, forma de pagamento)
   const pedidosFiltrados = useMemo(() => {
-    const dias = DIAS_PERIODO[filtros.periodo]
-    const limite = dias !== null ? new Date(HOJE.getTime() - dias * 86400000) : null
-
     return pedidos.filter((p) => {
-      if (limite) {
-        const d = new Date(p.data)
-        if (d < limite) return false
-      }
       if (filtros.canal !== "todos" && p.canal !== filtros.canal) return false
       if (filtros.vendedor !== "todos" && p.vendedor !== filtros.vendedor) return false
       if (filtros.sku !== "todos" && p.sku !== filtros.sku) return false
@@ -162,6 +175,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const value: FiltrosContextValue = {
     filtros,
     setFiltro,
+    definirIntervalo,
     limpar,
     pedidosFiltrados,
     totalSemFiltro: pedidos.length,
