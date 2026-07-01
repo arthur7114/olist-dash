@@ -4,13 +4,10 @@ import { orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
 
-export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> {
+export async function getOrdersByPeriod(dataInicial: string, dataFinal?: string): Promise<Pedido[]> {
   const db = getDb()
-  const rows = await db
-    .select()
-    .from(orders)
-    .where(gte(orders.data, dataInicial))
-    .orderBy(desc(orders.data))
+  const condicao = dataFinal ? and(gte(orders.data, dataInicial), lte(orders.data, dataFinal)) : gte(orders.data, dataInicial)
+  const rows = await db.select().from(orders).where(condicao).orderBy(desc(orders.data))
   return rows.map(rowToPedido)
 }
 

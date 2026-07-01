@@ -1,9 +1,13 @@
 "use client"
 
-import { useMemo } from "react"
-import { RotateCcw, SlidersHorizontal } from "lucide-react"
+import { useMemo, useState } from "react"
+import { CalendarIcon, RotateCcw, SlidersHorizontal } from "lucide-react"
+import { ptBR } from "date-fns/locale"
+import type { DateRange } from "react-day-picker"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -11,17 +15,71 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import {
   VENDEDORES_POR_CANAL,
 } from "@/lib/data"
-import { useFiltros } from "@/lib/filters"
+import { type PeriodoOpcao, useFiltros } from "@/lib/filters"
 
-const PERIODOS: { valor: "7d" | "15d" | "30d" | "tudo"; label: string }[] = [
+const PERIODOS: { valor: PeriodoOpcao; label: string }[] = [
   { valor: "7d", label: "Últimos 7 dias" },
   { valor: "15d", label: "Últimos 15 dias" },
   { valor: "30d", label: "Últimos 30 dias" },
   { valor: "tudo", label: "Todo o período" },
+  { valor: "custom", label: "Personalizado…" },
 ]
+
+function formatarData(iso: string) {
+  const [ano, mes, dia] = iso.split("-")
+  return `${dia}/${mes}/${ano}`
+}
+
+function SeletorIntervalo() {
+  const { filtros, definirIntervalo } = useFiltros()
+  const [aberto, setAberto] = useState(false)
+  const [rascunho, setRascunho] = useState<DateRange | undefined>(
+    filtros.intervalo
+      ? { from: new Date(`${filtros.intervalo.inicio}T00:00:00`), to: new Date(`${filtros.intervalo.fim}T00:00:00`) }
+      : undefined,
+  )
+
+  const rotulo = filtros.intervalo
+    ? `${formatarData(filtros.intervalo.inicio)} – ${formatarData(filtros.intervalo.fim)}`
+    : "Selecione as datas"
+
+  return (
+    <Popover open={aberto} onOpenChange={setAberto}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          className={cn(
+            "w-full justify-start gap-2 bg-background font-normal",
+            !filtros.intervalo && "text-muted-foreground",
+          )}
+        >
+          <CalendarIcon className="h-4 w-4" />
+          {rotulo}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="range"
+          locale={ptBR}
+          numberOfMonths={2}
+          defaultMonth={rascunho?.from}
+          selected={rascunho}
+          onSelect={(range) => {
+            setRascunho(range)
+            if (range?.from && range?.to) {
+              definirIntervalo(range.from, range.to)
+              setAberto(false)
+            }
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export function GlobalFilters() {
   const { filtros, setFiltro, limpar, opcoes } = useFiltros()
@@ -55,6 +113,13 @@ export function GlobalFilters() {
             </SelectContent>
           </Select>
         </div>
+
+        {filtros.periodo === "custom" && (
+          <div className="col-span-2 flex flex-col gap-1.5 md:col-span-1">
+            <Label className="text-xs text-muted-foreground">Intervalo</Label>
+            <SeletorIntervalo />
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <Label className="text-xs text-muted-foreground">Canal</Label>
