@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
+import { InfoTooltip } from "@/components/dashboard/info-tooltip"
 
 interface KpiCardProps {
   titulo: string
@@ -10,15 +11,19 @@ interface KpiCardProps {
   variacao?: number // ex: 0.082 = +8,2%
   destaque?: "default" | "positivo" | "alerta"
   legenda?: string
+  tooltip?: string
 }
 
-export function KpiCard({ titulo, valor, icone: Icone, variacao, destaque = "default", legenda }: KpiCardProps) {
+export function KpiCard({ titulo, valor, icone: Icone, variacao, destaque = "default", legenda, tooltip }: KpiCardProps) {
   const positiva = (variacao ?? 0) >= 0
 
   return (
     <Card className="gap-0 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-muted-foreground">{titulo}</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+          {titulo}
+          {tooltip && <InfoTooltip texto={tooltip} />}
+        </span>
         <div
           className={cn(
             "flex h-8 w-8 items-center justify-center rounded-lg",

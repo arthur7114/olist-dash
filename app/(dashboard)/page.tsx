@@ -25,14 +25,14 @@ export default function VisaoGeralPage() {
   const kpiAnterior = calcularKPIs(pedidosPeriodoAnterior)
 
   const cards = [
-    { titulo: "Faturamento bruto", valor: formatBRL(kpi.faturamentoBruto), icone: DollarSign, variacao: variacaoPct(kpi.faturamentoBruto, kpiAnterior.faturamentoBruto), destaque: "positivo" as const, legenda: "vs. período anterior" },
+    { titulo: "Faturamento bruto", valor: formatBRL(kpi.faturamentoBruto), icone: DollarSign, variacao: variacaoPct(kpi.faturamentoBruto, kpiAnterior.faturamentoBruto), destaque: "positivo" as const, legenda: "vs. período anterior", tooltip: "Soma do valor de venda de todos os pedidos do período, antes de descontar devoluções, taxas e custos." },
     { titulo: "Quantidade de pedidos", valor: formatNumero(kpi.quantidadePedidos), icone: ShoppingCart, variacao: variacaoPct(kpi.quantidadePedidos, kpiAnterior.quantidadePedidos), destaque: "default" as const, legenda: "pedidos no período" },
     { titulo: "Valor total de frete", valor: formatBRL(kpi.totalFrete), icone: Truck, variacao: variacaoPct(kpi.totalFrete, kpiAnterior.totalFrete), destaque: "default" as const, legenda: "custo logístico" },
-    { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: variacaoPct(kpi.totalDevolucoes, kpiAnterior.totalDevolucoes), destaque: "alerta" as const, legenda: "vs. período anterior" },
-    { titulo: "Margem de contribuição", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: variacaoPct(kpi.lucroBruto, kpiAnterior.lucroBruto), destaque: "positivo" as const, legenda: "receita − custos/taxas variáveis" },
+    { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: variacaoPct(kpi.totalDevolucoes, kpiAnterior.totalDevolucoes), destaque: "alerta" as const, legenda: "vs. período anterior", tooltip: "Pedido cancelado na Olist conta como devolução total. O valor aparece no mês da venda original, não no mês do cancelamento." },
+    { titulo: "Margem de contribuição", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: variacaoPct(kpi.lucroBruto, kpiAnterior.lucroBruto), destaque: "positivo" as const, legenda: "receita − custos/taxas variáveis", tooltip: "Quanto sobra da venda depois de descontar custo do produto, frete, devoluções e tarifas do marketplace." },
     { titulo: "Ticket médio", valor: formatBRL(kpi.ticketMedio), icone: Receipt, variacao: variacaoPct(kpi.ticketMedio, kpiAnterior.ticketMedio), destaque: "default" as const, legenda: "por pedido" },
-    { titulo: "Margem de contribuição %", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: variacaoPct(kpi.margemMedia, kpiAnterior.margemMedia), destaque: "positivo" as const, legenda: "M.C. / receita líquida" },
-    { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: variacaoPct(kpi.markupMedio, kpiAnterior.markupMedio), destaque: "default" as const, legenda: "venda / custo" },
+    { titulo: "Margem de contribuição %", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: variacaoPct(kpi.margemMedia, kpiAnterior.margemMedia), destaque: "positivo" as const, legenda: "M.C. / receita líquida", tooltip: "Margem de contribuição dividida pela receita líquida. Diferente do markup, é expressa como % sobre a venda." },
+    { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: variacaoPct(kpi.markupMedio, kpiAnterior.markupMedio), destaque: "default" as const, legenda: "venda / custo", tooltip: "Quantas vezes o preço de venda cobre o custo do produto. Markup 2,0x = vendido pelo dobro do custo." },
   ]
 
   return (
