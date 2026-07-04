@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { agregarPorSku, skuPorMes } from "@/lib/sku-analytics"
+import { agregarPorSku, prepararMatrizMargem, skuPorMes, type LinhaSku } from "@/lib/sku-analytics"
 import type { Pedido } from "@/lib/data"
+
+function linhaSku(parcial: Partial<LinhaSku>): LinhaSku {
+  return {
+    sku: "A", produto: "Prod A", canais: ["Mercado Livre"], pedidos: 1,
+    qtdVendida: 1, qtdDevolvida: 0, faturamento: 1000, devolucaoValor: 0,
+    faturamentoLiquido: 1000, custoTotal: 500, taxaAlocada: 0, freteAlocado: 0,
+    margemValor: 200, margemPct: 0.2, markup: 2, ticketMedio: 1000, taxaDevolucao: 0,
+    semCusto: false, alertas: [], ...parcial,
+  }
+}
 
 function pedido(parcial: Partial<Pedido>): Pedido {
   return {
@@ -54,6 +64,43 @@ describe("agregarPorSku", () => {
     ])
     expect(linhas.find((l) => l.sku === "SC")!.alertas).toContain("sem-custo")
     expect(linhas.find((l) => l.sku === "MB")!.alertas).toContain("margem-baixa")
+  })
+})
+
+describe("prepararMatrizMargem", () => {
+  it("mantém o eixo legível mesmo com outlier extremo (SKU de micro-faturamento)", () => {
+    const linhas = [
+      linhaSku({ sku: "OK1", margemPct: 0.25 }),
+      linhaSku({ sku: "OK2", margemPct: 0.1 }),
+      linhaSku({ sku: "OK3", margemPct: -0.15 }),
+      // R$1 de faturamento com frete rateado gera margem de -3060%
+      linhaSku({ sku: "OUT", faturamento: 1, margemPct: -30.6, alertas: ["margem-baixa"] }),
+    ]
+    const { pontos, dominioY } = prepararMatrizMargem(linhas)
+    const [lo, hi] = dominioY
+    // o domínio não é arrastado até -30; fica numa faixa legível
+    expect(lo).toBeGreaterThan(-1.1)
+    expect(hi).toBeLessThanOrEqual(1.1)
+    expect(lo).toBeLessThan(0)
+    // o outlier é fixado na borda inferior para plotagem, mas preserva o valor real
+    const out = pontos.find((p) => p.sku === "OUT")!
+    expect(out.yReal).toBe(-30.6)
+    expect(out.y).toBeGreaterThanOrEqual(lo)
+    expect(out.foraDaEscala).toBe(true)
+    // pontos normais mantêm o valor real dentro do domínio
+    const ok1 = pontos.find((p) => p.sku === "OK1")!
+    expect(ok1.y).toBeCloseTo(0.25)
+    expect(ok1.foraDaEscala).toBe(false)
+  })
+
+  it("ignora SKUs sem faturamento e mantém 0% visível", () => {
+    const { pontos, dominioY } = prepararMatrizMargem([
+      linhaSku({ sku: "Z", faturamento: 0, margemPct: 0.5 }),
+      linhaSku({ sku: "P", margemPct: 0.3 }),
+    ])
+    expect(pontos.map((p) => p.sku)).toEqual(["P"])
+    expect(dominioY[0]).toBeLessThanOrEqual(0)
+    expect(dominioY[1]).toBeGreaterThanOrEqual(0)
   })
 })
 

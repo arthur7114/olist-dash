@@ -103,6 +103,55 @@ export function agregarPorSku(pedidos: Pedido[]): LinhaSku[] {
     .sort((a, b) => b.faturamento - a.faturamento)
 }
 
+export interface PontoMatriz {
+  x: number
+  /** margem % usada na plotagem (fixada no domínio para não achatar o eixo). */
+  y: number
+  /** margem % real, exibida no tooltip. */
+  yReal: number
+  sku: string
+  produto: string
+  alerta: boolean
+  foraDaEscala: boolean
+}
+
+function percentil(ordenado: number[], p: number): number {
+  if (!ordenado.length) return 0
+  const idx = Math.round((ordenado.length - 1) * p)
+  return ordenado[Math.min(ordenado.length - 1, Math.max(0, idx))]
+}
+
+// Prepara os pontos da matriz faturamento × margem com um domínio Y robusto:
+// SKUs de micro-faturamento podem ter margem % absurda (ex.: -3060% com R$1 de
+// venda e frete rateado), o que achataria todos os demais pontos. Calculamos a
+// faixa pelos percentis 5–95 (limitada a ±100%) e fixamos outliers na borda,
+// mantendo o valor real para o tooltip.
+export function prepararMatrizMargem(linhas: LinhaSku[]): { pontos: PontoMatriz[]; dominioY: [number, number] } {
+  const base = linhas.filter((l) => l.faturamento > 0)
+  const margens = base.map((l) => l.margemPct).sort((a, b) => a - b)
+
+  const CAP = 1 // ±100% — margens além disso são tratadas como fora da escala
+  let lo = Math.max(-CAP, percentil(margens, 0.05))
+  let hi = Math.min(CAP, percentil(margens, 0.95))
+  lo = Math.min(lo, 0)
+  hi = Math.max(hi, 0)
+  const pad = Math.max((hi - lo) * 0.1, 0.02)
+  lo = Math.max(-CAP, lo - pad)
+  hi = Math.min(CAP, hi + pad)
+
+  const pontos = base.map((l) => ({
+    x: l.faturamento,
+    yReal: l.margemPct,
+    y: Math.min(hi, Math.max(lo, l.margemPct)),
+    sku: l.sku,
+    produto: l.produto,
+    alerta: l.alertas.length > 0,
+    foraDaEscala: l.margemPct < lo || l.margemPct > hi,
+  }))
+
+  return { pontos, dominioY: [lo, hi] }
+}
+
 export interface SkuMensal {
   mes: string
   faturamento: number

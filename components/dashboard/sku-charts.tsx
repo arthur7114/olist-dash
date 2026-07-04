@@ -4,7 +4,7 @@ import { Bar, BarChart, CartesianGrid, Scatter, ScatterChart, XAxis, YAxis, ZAxi
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { formatBRLCompacto, formatPercent } from "@/lib/data"
-import type { LinhaSku } from "@/lib/sku-analytics"
+import { prepararMatrizMargem, type LinhaSku } from "@/lib/sku-analytics"
 
 const topConfig = {
   valor: { label: "Valor", color: "var(--chart-1)" },
@@ -69,9 +69,7 @@ const matrizConfig = {
 // Matriz faturamento × margem %: canto inferior direito = vende muito com margem
 // ruim (prioridade de correção de preço/custo).
 export function MatrizFaturamentoMargemChart({ linhas }: { linhas: LinhaSku[] }) {
-  const pontos = linhas
-    .filter((l) => l.faturamento > 0)
-    .map((l) => ({ x: l.faturamento, y: l.margemPct, sku: l.sku, produto: l.produto, alerta: l.alertas.length > 0 }))
+  const { pontos, dominioY } = prepararMatrizMargem(linhas)
 
   return (
     <Card>
@@ -84,14 +82,18 @@ export function MatrizFaturamentoMargemChart({ linhas }: { linhas: LinhaSku[] })
           <ScatterChart margin={{ left: 8, right: 16, top: 8 }}>
             <CartesianGrid />
             <XAxis type="number" dataKey="x" name="Faturamento" tickLine={false} axisLine={false} tickFormatter={(v) => formatBRLCompacto(Number(v))} />
-            <YAxis type="number" dataKey="y" name="Margem %" tickLine={false} axisLine={false} width={68} tickFormatter={(v) => formatPercent(Number(v), 0)} />
+            <YAxis type="number" dataKey="y" name="Margem %" domain={dominioY} allowDataOverflow tickLine={false} axisLine={false} width={68} tickFormatter={(v) => formatPercent(Number(v), 0)} />
             <ZAxis range={[50, 51]} />
             <ChartTooltip
               cursor={{ strokeDasharray: "3 3" }}
               content={
                 <ChartTooltipContent
                   labelFormatter={(_, payload) => payload?.[0]?.payload?.sku ?? ""}
-                  formatter={(value, name) => (name === "Margem %" ? formatPercent(Number(value)) : formatBRLCompacto(Number(value)))}
+                  formatter={(value, name, item) =>
+                    name === "Margem %"
+                      ? formatPercent(Number(item?.payload?.yReal ?? value)) + (item?.payload?.foraDaEscala ? " · fora da escala" : "")
+                      : formatBRLCompacto(Number(value))
+                  }
                 />
               }
             />
