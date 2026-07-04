@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizarPeriodo, rangePeriodo } from "@/lib/periodo"
+import { normalizarPeriodo, rangePeriodo, rangePersonalizado } from "@/lib/periodo"
 
 const REF = new Date("2026-07-04T15:30:00Z")
 
@@ -38,5 +38,31 @@ describe("normalizarPeriodo", () => {
     expect(normalizarPeriodo("mes")).toBe("mes")
     expect(normalizarPeriodo("xyz")).toBe("30d")
     expect(normalizarPeriodo(null)).toBe("30d")
+  })
+  it("aceita custom", () => {
+    expect(normalizarPeriodo("custom")).toBe("custom")
+  })
+})
+
+describe("rangePersonalizado", () => {
+  it("usa as datas informadas e compara com janela anterior de mesma duração", () => {
+    expect(rangePersonalizado("2026-06-10", "2026-06-19")).toEqual({
+      inicio: "2026-06-10", fim: "2026-06-19",
+      inicioAnterior: "2026-05-31", fimAnterior: "2026-06-09",
+    })
+  })
+  it("um único dia compara com o dia anterior", () => {
+    expect(rangePersonalizado("2026-06-10", "2026-06-10")).toEqual({
+      inicio: "2026-06-10", fim: "2026-06-10",
+      inicioAnterior: "2026-06-09", fimAnterior: "2026-06-09",
+    })
+  })
+  it("datas inválidas ou invertidas retornam range vazio", () => {
+    expect(rangePersonalizado("2026-06-19", "2026-06-10")).toEqual({
+      inicio: null, fim: null, inicioAnterior: null, fimAnterior: null,
+    })
+    expect(rangePersonalizado("xx", "2026-06-10")).toEqual({
+      inicio: null, fim: null, inicioAnterior: null, fimAnterior: null,
+    })
   })
 })

@@ -3,13 +3,17 @@ import { PEDIDOS } from "@/lib/data"
 import { hasDatabase } from "@/lib/db/client"
 import { getOrdersByPeriod } from "@/lib/db/orders"
 import { getSyncState } from "@/lib/db/syncState"
-import { getOrderDateRange, normalizePeriod } from "@/lib/olist-v3"
+import { normalizarPeriodo, rangePeriodo, rangePersonalizado } from "@/lib/periodo"
 
 export const runtime = "nodejs"
 
 // O dashboard lê do banco (preenchido pelo job de sync) — sem chamadas à Olist aqui.
+// Busca desde o início da janela ANTERIOR para o cliente montar o comparativo.
 export async function GET(request: Request) {
-  const periodo = new URL(request.url).searchParams.get("periodo") ?? "7d"
+  const url = new URL(request.url)
+  const periodo = normalizarPeriodo(url.searchParams.get("periodo"))
+  const de = url.searchParams.get("de")
+  const ate = url.searchParams.get("ate")
 
   if (!hasDatabase()) {
     return NextResponse.json({
@@ -21,8 +25,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const dataInicial =
-      periodo === "tudo" ? "1970-01-01" : getOrderDateRange(normalizePeriod(periodo)).dataInicial
+    const range = periodo === "custom" && de && ate ? rangePersonalizado(de, ate) : rangePeriodo(periodo, new Date())
+    const dataInicial = range.inicioAnterior ?? range.inicio ?? "1970-01-01"
     const [pedidos, state] = await Promise.all([getOrdersByPeriod(dataInicial), getSyncState()])
 
     if (!pedidos.length) {

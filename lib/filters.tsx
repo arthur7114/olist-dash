@@ -12,11 +12,14 @@ import {
   type Pedido,
   type Produto,
 } from "@/lib/data"
+import { rangePeriodo, rangePersonalizado, type PeriodoOpcao } from "@/lib/periodo"
 
-export type PeriodoOpcao = "7d" | "15d" | "30d" | "tudo"
+export type { PeriodoOpcao } // re-export para os componentes existentes
 
 export interface FiltrosState {
   periodo: PeriodoOpcao
+  customInicio: string | null
+  customFim: string | null
   canal: Canal | "todos"
   vendedor: string | "todos"
   sku: string | "todos"
@@ -26,13 +29,16 @@ export interface FiltrosState {
 interface FiltrosContextValue {
   filtros: FiltrosState
   setFiltro: <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => void
+  setPeriodoPersonalizado: (inicio: string, fim: string) => void
   limpar: () => void
   pedidosFiltrados: Pedido[]
+  pedidosPeriodoAnterior: Pedido[]
   totalSemFiltro: number
   carregando: boolean
   fonteDados: "mock" | "real"
   autenticado: boolean
   mensagemDados?: string
+  lastSync: string | null
   opcoes: {
     canais: Canal[]
     vendedores: string[]
@@ -43,6 +49,8 @@ interface FiltrosContextValue {
 
 const padrao: FiltrosState = {
   periodo: "30d",
+  customInicio: null,
+  customFim: null,
   canal: "todos",
   vendedor: "todos",
   sku: "todos",
@@ -51,16 +59,6 @@ const padrao: FiltrosState = {
 
 const FiltrosContext = createContext<FiltrosContextValue | null>(null)
 
-const DIAS_PERIODO: Record<PeriodoOpcao, number | null> = {
-  "7d": 7,
-  "15d": 15,
-  "30d": 30,
-  tudo: null,
-}
-
-// data de referência fixa do mock
-const HOJE = new Date("2026-05-30")
-
 export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [filtros, setFiltros] = useState<FiltrosState>(padrao)
   const [pedidos, setPedidos] = useState<Pedido[]>(PEDIDOS)
@@ -68,19 +66,31 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [fonteDados, setFonteDados] = useState<"mock" | "real">("mock")
   const [autenticado, setAutenticado] = useState(false)
   const [mensagemDados, setMensagemDados] = useState<string>()
+  const [lastSync, setLastSync] = useState<string | null>(null)
+
+  // Período customizado ainda sem as duas datas escolhidas: não busca (evita
+  // refetch a cada clique no calendário antes do usuário fechar o intervalo).
+  const customIncompleto = filtros.periodo === "custom" && !(filtros.customInicio && filtros.customFim)
 
   useEffect(() => {
+    if (customIncompleto) return
     let ativo = true
 
     async function carregarPedidos() {
       setCarregando(true)
       try {
-        const response = await fetch(`/api/olist/orders?periodo=${filtros.periodo}`, { cache: "no-store" })
+        const params = new URLSearchParams({ periodo: filtros.periodo })
+        if (filtros.periodo === "custom" && filtros.customInicio && filtros.customFim) {
+          params.set("de", filtros.customInicio)
+          params.set("ate", filtros.customFim)
+        }
+        const response = await fetch(`/api/olist/orders?${params}`, { cache: "no-store" })
         const data = (await response.json()) as {
           source?: "mock" | "real"
           authenticated?: boolean
           pedidos?: Pedido[]
           message?: string
+          lastSync?: string | null
         }
 
         if (!ativo) return
@@ -88,6 +98,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
         setFonteDados(data.source ?? "mock")
         setAutenticado(Boolean(data.authenticated))
         setMensagemDados(data.message)
+        setLastSync(data.lastSync ?? null)
       } catch {
         if (!ativo) return
         setPedidos(PEDIDOS)
@@ -104,35 +115,68 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     return () => {
       ativo = false
     }
-  }, [filtros.periodo])
+  }, [filtros.periodo, filtros.customInicio, filtros.customFim, customIncompleto])
 
   const setFiltro = <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => {
     setFiltros((prev) => {
       const next = { ...prev, [chave]: valor }
       // ao trocar de canal, reseta vendedor
       if (chave === "canal") next.vendedor = "todos"
+      // ao sair de "custom", limpa as datas escolhidas
+      if (chave === "periodo" && valor !== "custom") {
+        next.customInicio = null
+        next.customFim = null
+      }
       return next
     })
   }
 
+  const setPeriodoPersonalizado = (inicio: string, fim: string) =>
+    setFiltros((prev) => ({ ...prev, periodo: "custom", customInicio: inicio, customFim: fim }))
+
   const limpar = () => setFiltros(padrao)
 
-  const pedidosFiltrados = useMemo(() => {
-    const dias = DIAS_PERIODO[filtros.periodo]
-    const limite = dias !== null ? new Date(HOJE.getTime() - dias * 86400000) : null
+  // Referência = maior data do dataset (funciona p/ mock congelado e p/ dados reais).
+  const referencia = useMemo(() => {
+    let max = ""
+    for (const p of pedidos) if (p.data > max) max = p.data
+    return max ? new Date(max + "T00:00:00Z") : new Date()
+  }, [pedidos])
 
-    return pedidos.filter((p) => {
-      if (limite) {
-        const d = new Date(p.data)
-        if (d < limite) return false
-      }
+  const range = useMemo(() => {
+    if (filtros.periodo === "custom" && filtros.customInicio && filtros.customFim) {
+      return rangePersonalizado(filtros.customInicio, filtros.customFim)
+    }
+    return rangePeriodo(filtros.periodo, referencia)
+  }, [filtros.periodo, filtros.customInicio, filtros.customFim, referencia])
+
+  const passaDimensoes = useMemo(() => {
+    return (p: Pedido) => {
       if (filtros.canal !== "todos" && p.canal !== filtros.canal) return false
       if (filtros.vendedor !== "todos" && p.vendedor !== filtros.vendedor) return false
       if (filtros.sku !== "todos" && p.sku !== filtros.sku) return false
       if (filtros.formaPagamento !== "todos" && p.formaPagamento !== filtros.formaPagamento) return false
       return true
-    })
-  }, [filtros, pedidos])
+    }
+  }, [filtros])
+
+  const pedidosFiltrados = useMemo(
+    () =>
+      pedidos.filter((p) => {
+        if (range.inicio && p.data < range.inicio) return false
+        if (range.fim && p.data > range.fim) return false
+        return passaDimensoes(p)
+      }),
+    [pedidos, range, passaDimensoes],
+  )
+
+  // Mesmos filtros dimensionais na janela anterior — base do "vs. período anterior".
+  const pedidosPeriodoAnterior = useMemo(() => {
+    if (!range.inicioAnterior || !range.fimAnterior) return []
+    return pedidos.filter(
+      (p) => p.data >= range.inicioAnterior! && p.data <= range.fimAnterior! && passaDimensoes(p),
+    )
+  }, [pedidos, range, passaDimensoes])
 
   const opcoes = useMemo(() => {
     const canais = uniqueSorted([...CANAIS, ...pedidos.map((p) => p.canal)])
@@ -162,13 +206,16 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const value: FiltrosContextValue = {
     filtros,
     setFiltro,
+    setPeriodoPersonalizado,
     limpar,
     pedidosFiltrados,
+    pedidosPeriodoAnterior,
     totalSemFiltro: pedidos.length,
     carregando,
     fonteDados,
     autenticado,
     mensagemDados,
+    lastSync,
     opcoes,
   }
 

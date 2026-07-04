@@ -2,7 +2,7 @@
 // A janela "anterior" tem a mesma duração da atual e termina no dia anterior
 // ao início dela — base do comparativo "vs. período anterior" dos KPIs.
 
-export type PeriodoOpcao = "7d" | "15d" | "30d" | "90d" | "mes" | "mes-anterior" | "tudo"
+export type PeriodoOpcao = "7d" | "15d" | "30d" | "90d" | "mes" | "mes-anterior" | "tudo" | "custom"
 
 export interface RangePeriodo {
   inicio: string | null
@@ -11,7 +11,18 @@ export interface RangePeriodo {
   fimAnterior: string | null
 }
 
-export const PERIODOS_VALIDOS: PeriodoOpcao[] = ["7d", "15d", "30d", "90d", "mes", "mes-anterior", "tudo"]
+export const PERIODOS_VALIDOS: PeriodoOpcao[] = [
+  "7d",
+  "15d",
+  "30d",
+  "90d",
+  "mes",
+  "mes-anterior",
+  "tudo",
+  "custom",
+]
+
+const DATA_ISO = /^\d{4}-\d{2}-\d{2}$/
 
 const DIAS: Partial<Record<PeriodoOpcao, number>> = { "7d": 7, "15d": 15, "30d": 30, "90d": 90 }
 
@@ -75,6 +86,23 @@ export function rangePeriodo(periodo: PeriodoOpcao, referencia: Date): RangePeri
   }
 
   return { inicio: null, fim: null, inicioAnterior: null, fimAnterior: null }
+}
+
+// Range com datas escolhidas pelo usuário ("Personalizado"). A janela anterior
+// tem a mesma duração e termina no dia anterior ao início — mesma regra dos presets.
+export function rangePersonalizado(inicio: string, fim: string): RangePeriodo {
+  if (!DATA_ISO.test(inicio) || !DATA_ISO.test(fim) || inicio > fim) {
+    return { inicio: null, fim: null, inicioAnterior: null, fimAnterior: null }
+  }
+  const ini = new Date(inicio + "T00:00:00Z")
+  const f = new Date(fim + "T00:00:00Z")
+  const dias = Math.round((f.getTime() - ini.getTime()) / 86_400_000) + 1
+  return {
+    inicio,
+    fim,
+    inicioAnterior: iso(addDias(ini, -dias)),
+    fimAnterior: iso(addDias(ini, -1)),
+  }
 }
 
 export function normalizarPeriodo(valor: string | null): PeriodoOpcao {
