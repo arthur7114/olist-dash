@@ -53,6 +53,19 @@ export const orderItems = pgTable(
   }),
 )
 
+// Custos reais por pedido vindos da API do Mercado Livre (sale_fee + frete do vendedor).
+// Join com orders via olist_id; ml_order_id = raw.ecommerce.numeroPedidoEcommerce.
+export const mlOrderCosts = pgTable("ml_order_costs", {
+  mlOrderId: text("ml_order_id").primaryKey(),
+  olistId: text("olist_id").notNull().unique(),
+  saleFee: numeric("sale_fee", { precision: 14, scale: 2 }).notNull().default("0"),
+  shippingCost: numeric("shipping_cost", { precision: 14, scale: 2 }).notNull().default("0"),
+  listingType: text("listing_type"),
+  mlStatus: text("ml_status"),
+  raw: jsonb("raw"),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
 // Cache de custo de produto, persistente entre cold starts. ref = "id:123" ou "sku:ABC".
 export const productCosts = pgTable("product_costs", {
   ref: text("ref").primaryKey(),
