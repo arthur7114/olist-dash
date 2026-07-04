@@ -38,11 +38,11 @@ export default function DevolucoesPage() {
     { accessorKey: "data", header: "Data", cell: ({ row }) => <span className="tabular-nums">{formatData(row.original.data)}</span> },
     { accessorKey: "numeroPedido", header: "Pedido", cell: ({ row }) => <span className="font-medium">{row.original.numeroPedido}</span> },
     { accessorKey: "numeroNF", header: "NF", cell: ({ row }) => <span className="text-muted-foreground">{row.original.numeroNF}</span> },
-    { accessorKey: "canal", header: "Canal" },
-    { accessorKey: "vendedor", header: "Vendedor", cell: ({ row }) => <span className="text-muted-foreground">{row.original.vendedor}</span> },
+    { accessorKey: "canal", header: "Canal", meta: { filtro: "select" } },
+    { accessorKey: "vendedor", header: "Vendedor", meta: { filtro: "select" }, cell: ({ row }) => <span className="text-muted-foreground">{row.original.vendedor}</span> },
     { accessorKey: "produto", header: "Produto", cell: ({ row }) => <span className="block max-w-56 truncate">{row.original.produto}</span> },
-    { accessorKey: "quantidade", header: "Itens", cell: ({ row }) => <span className="tabular-nums">{formatNumero(row.original.quantidade)}</span> },
-    { accessorKey: "devolucao", header: "Valor devolvido", cell: ({ row }) => <span className="tabular-nums font-medium text-destructive">{formatBRL(row.original.devolucao)}</span> },
+    { accessorKey: "quantidade", header: "Itens", meta: { alinhar: "right" }, cell: ({ row }) => <span className="tabular-nums">{formatNumero(row.original.quantidade)}</span> },
+    { accessorKey: "devolucao", header: "Valor devolvido", meta: { alinhar: "right" }, cell: ({ row }) => <span className="tabular-nums font-medium text-destructive">{formatBRL(row.original.devolucao)}</span> },
   ]
 
   return (
@@ -68,6 +68,7 @@ export default function DevolucoesPage() {
 
       <Card className="gap-0 overflow-hidden p-0">
         <DataTable
+          tableId="devolucoes"
           columns={colunas}
           data={devolvidos}
           buscaPlaceholder="Buscar pedido, NF, produto..."
