@@ -444,3 +444,9 @@ export function formatData(iso: string): string {
 export function formatMarkup(valor: number): string {
   return `${valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x`
 }
+
+// Variação % vs. período anterior. undefined = sem base de comparação (oculta no card).
+export function variacaoPct(atual: number, anterior: number): number | undefined {
+  if (!Number.isFinite(anterior) || anterior === 0) return undefined
+  return (atual - anterior) / Math.abs(anterior)
+}
