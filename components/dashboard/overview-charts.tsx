@@ -37,7 +37,7 @@ export function FaturamentoLucroChart({ pedidos }: { pedidos: Pedido[] }) {
       </CardHeader>
       <CardContent>
         <ChartContainer config={serieConfig} className="aspect-auto h-[280px] w-full">
-          <AreaChart data={dados} margin={{ left: 4, right: 8, top: 8 }}>
+          <AreaChart data={dados} margin={{ left: 8, right: 8, top: 8 }}>
             <defs>
               <linearGradient id="fillFat" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="var(--color-faturamento)" stopOpacity={0.3} />
@@ -54,7 +54,7 @@ export function FaturamentoLucroChart({ pedidos }: { pedidos: Pedido[] }) {
               tickLine={false}
               axisLine={false}
               tickMargin={8}
-              width={56}
+              width={68}
               tickFormatter={(v) => formatBRLCompacto(Number(v))}
             />
             <ChartTooltip
@@ -107,14 +107,14 @@ export function CanalBarChart({ pedidos }: { pedidos: Pedido[] }) {
       </CardHeader>
       <CardContent>
         <ChartContainer config={canalConfig} className="aspect-auto h-[280px] w-full">
-          <BarChart data={dados} margin={{ left: 4, right: 8, top: 8 }}>
+          <BarChart data={dados} margin={{ left: 8, right: 8, top: 8 }}>
             <CartesianGrid vertical={false} />
             <XAxis dataKey="canal" tickLine={false} axisLine={false} tickMargin={8} interval={0} fontSize={11} />
             <YAxis
               tickLine={false}
               axisLine={false}
               tickMargin={8}
-              width={56}
+              width={68}
               tickFormatter={(v) => formatBRLCompacto(Number(v))}
             />
             <ChartTooltip
