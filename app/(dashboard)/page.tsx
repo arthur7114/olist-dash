@@ -14,6 +14,7 @@ import {
 import { PageTitle } from "@/components/dashboard/page-title"
 import { GlobalFilters } from "@/components/dashboard/global-filters"
 import { KpiCard } from "@/components/dashboard/kpi-card"
+import { MlCostCoverage } from "@/components/dashboard/ml-cost-coverage"
 import { CanalBarChart, FaturamentoLucroChart } from "@/components/dashboard/overview-charts"
 import { useFiltros } from "@/lib/filters"
 import { calcularKPIs, formatBRL, formatMarkup, formatNumero, formatPercent, variacaoPct } from "@/lib/data"
@@ -42,6 +43,7 @@ export default function VisaoGeralPage() {
       />
 
       <GlobalFilters />
+      <MlCostCoverage />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (

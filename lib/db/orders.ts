@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm"
 import { getDb } from "./client"
-import { orders } from "./schema"
+import { mlOrderCosts, orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import { statusPorSituacao } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
@@ -10,11 +10,12 @@ import { replaceOrderItems } from "./orderItems"
 export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> {
   const db = getDb()
   const rows = await db
-    .select()
+    .select({ order: orders, mlSaleFee: mlOrderCosts.saleFee, mlShipping: mlOrderCosts.shippingCost })
     .from(orders)
+    .leftJoin(mlOrderCosts, eq(mlOrderCosts.olistId, orders.olistId))
     .where(gte(orders.data, dataInicial))
     .orderBy(desc(orders.data))
-  return rows.map(rowToPedido)
+  return rows.map((r) => rowToPedido(r.order, r.mlSaleFee, r.mlShipping))
 }
 
 // Pedidos com custo zerado (mas com venda) e detalhe salvo — alvo do recálculo de custos.
@@ -49,7 +50,13 @@ export async function getExistingOrderIds(dataInicial: string, dataFinal: string
   return new Set(rows.map((r) => r.id))
 }
 
-function rowToPedido(r: typeof orders.$inferSelect): Pedido {
+function rowToPedido(
+  r: typeof orders.$inferSelect,
+  mlSaleFee?: string | null,
+  mlShipping?: string | null,
+): Pedido {
+  const saleFee = Number(mlSaleFee ?? 0)
+  const custoMlReal = saleFee > 0
   return {
     id: r.olistId,
     numeroPedido: r.numeroPedido,
@@ -60,13 +67,15 @@ function rowToPedido(r: typeof orders.$inferSelect): Pedido {
     vendedor: r.vendedor,
     formaPagamento: normalizarFormaPagamento(r.formaPagamento) as FormaPagamento,
     valorVenda: Number(r.valorVenda),
-    valorFrete: Number(r.valorFrete),
+    // Custo real do ML quando importado; senão valores da Olist (frete 0 no ML).
+    valorFrete: custoMlReal ? Number(mlShipping ?? 0) : Number(r.valorFrete),
     devolucao: Number(r.devolucao),
-    taxaComissao: Number(r.taxaComissao),
+    taxaComissao: custoMlReal ? saleFee : Number(r.taxaComissao),
     custoTotal: Number(r.custoTotal),
     quantidade: Number(r.quantidade),
     statusPagamento: statusPorSituacao(r.situacao, r.statusPagamento as StatusPagamento),
     data: r.data,
+    custoMlReal,
   }
 }
 
