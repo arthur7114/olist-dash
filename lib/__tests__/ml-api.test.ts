@@ -60,4 +60,46 @@ describe("fetchMlOrderCost", () => {
     expect(result?.shippingCost).toBe(0)
     expect(result?.saleFee).toBe(10)
   })
+  it("numeroPedidoEcommerce é pack_id: cai para /packs e soma os pedidos do pacote", async () => {
+    const fetchFn = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes("/orders/2000013834311875")) return Promise.resolve(jsonResponse({ error: "not_found" }, 404))
+      if (u.includes("/packs/2000013834311875")) {
+        return Promise.resolve(
+          jsonResponse({ id: 2000013834311875, shipment: { id: 47443363572 }, orders: [{ id: 2000017242461256 }] }),
+        )
+      }
+      if (u.includes("/orders/2000017242461256")) {
+        return Promise.resolve(
+          jsonResponse({
+            id: 2000017242461256,
+            status: "paid",
+            order_items: [{ quantity: 1, sale_fee: 20, listing_type_id: "gold_pro" }],
+          }),
+        )
+      }
+      if (u.includes("/shipments/47443363572/costs")) {
+        return Promise.resolve(jsonResponse({ senders: [{ cost: 15 }] }))
+      }
+      return Promise.resolve(jsonResponse({ error: "not_found" }, 404))
+    })
+    const result = await fetchMlOrderCost("2000013834311875", "tok", fetchFn as unknown as typeof fetch)
+    expect(result).toEqual({
+      mlOrderId: "2000013834311875",
+      saleFee: 20,
+      shippingCost: 15,
+      listingType: "gold_pro",
+      mlStatus: "paid",
+      raw: expect.anything(),
+    })
+  })
+  it("pack sem pedidos resolvíveis retorna null", async () => {
+    const fetchFn = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes("/orders/")) return Promise.resolve(jsonResponse({ error: "not_found" }, 404))
+      if (u.includes("/packs/")) return Promise.resolve(jsonResponse({ id: 1, orders: [] }))
+      return Promise.resolve(jsonResponse({ error: "not_found" }, 404))
+    })
+    expect(await fetchMlOrderCost("1", "tok", fetchFn as unknown as typeof fetch)).toBeNull()
+  })
 })

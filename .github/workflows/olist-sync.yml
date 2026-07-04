@@ -31,3 +31,11 @@ jobs:
           if [ -n "$FULL" ]; then URL="$URL?full=1"; fi
           echo "POST $URL"
           curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 280 | tee /dev/stderr
+
+      - name: Trigger ML cost sync endpoint
+        env:
+          BASE_URL: ${{ vars.OLIST_BASE_URL || 'https://olist-dash.vercel.app' }}
+          SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
+        run: |
+          set -eo pipefail
+          curl -fsS -X POST "$BASE_URL/api/ml/sync" -H "Authorization: Bearer $SYNC_SECRET" -m 280 | tee /dev/stderr

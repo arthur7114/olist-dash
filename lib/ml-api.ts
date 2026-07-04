@@ -53,8 +53,19 @@ type MlOrder = {
   order_items?: Array<{ quantity?: number; sale_fee?: number; listing_type_id?: string }>
 }
 
+type MlPack = {
+  id?: number
+  shipment?: { id?: number }
+  orders?: Array<{ id?: number }>
+}
+
 type MlShipmentCosts = { senders?: Array<{ cost?: number }> }
 
+// A Olist às vezes grava o pack_id (carrinho multi-pedido do ML) em vez do
+// order_id em `ecommerce.numeroPedidoEcommerce` — comum quando o comprador
+// fecha vários itens do mesmo vendedor num único checkout. Quando /orders/{id}
+// dá 404, tentamos /packs/{id}: o pack agrega os order_ids reais e o shipment
+// (frete é por pacote, não por pedido individual).
 export async function fetchMlOrderCost(
   mlOrderId: string,
   accessToken: string,
@@ -63,19 +74,50 @@ export async function fetchMlOrderCost(
   const headers = { Authorization: `Bearer ${accessToken}` }
 
   const orderRes = await fetchFn(`${ML_API_URL}/orders/${mlOrderId}`, { headers, cache: "no-store" })
-  if (orderRes.status === 404) return null
-  if (!orderRes.ok) {
+  if (orderRes.ok) {
+    const order = (await orderRes.json()) as MlOrder
+    return buildCost(mlOrderId, [order], order.shipping?.id, headers, fetchFn)
+  }
+  if (orderRes.status !== 404) {
     throw new Error(`ML /orders/${mlOrderId} retornou ${orderRes.status}: ${await orderRes.text()}`)
   }
-  const order = (await orderRes.json()) as MlOrder
 
-  const saleFee = (order.order_items ?? []).reduce(
-    (sum, item) => sum + (item.sale_fee ?? 0) * Math.max(1, item.quantity ?? 1),
+  const packRes = await fetchFn(`${ML_API_URL}/packs/${mlOrderId}`, { headers, cache: "no-store" })
+  if (packRes.status === 404) return null
+  if (!packRes.ok) {
+    throw new Error(`ML /packs/${mlOrderId} retornou ${packRes.status}: ${await packRes.text()}`)
+  }
+  const pack = (await packRes.json()) as MlPack
+  const orderIds = (pack.orders ?? []).map((o) => o.id).filter((id): id is number => typeof id === "number")
+  if (!orderIds.length) return null
+
+  const orders = await Promise.all(
+    orderIds.map(async (id) => {
+      const res = await fetchFn(`${ML_API_URL}/orders/${id}`, { headers, cache: "no-store" })
+      return res.ok ? ((await res.json()) as MlOrder) : null
+    }),
+  )
+  const validOrders = orders.filter((o): o is MlOrder => o !== null)
+  if (!validOrders.length) return null
+
+  return buildCost(mlOrderId, validOrders, pack.shipment?.id, headers, fetchFn)
+}
+
+async function buildCost(
+  mlOrderId: string,
+  orders: MlOrder[],
+  shippingId: number | undefined,
+  headers: Record<string, string>,
+  fetchFn: typeof fetch,
+): Promise<MlOrderCost> {
+  const saleFee = orders.reduce(
+    (sum, order) =>
+      sum +
+      (order.order_items ?? []).reduce((s, item) => s + (item.sale_fee ?? 0) * Math.max(1, item.quantity ?? 1), 0),
     0,
   )
 
   let shippingCost = 0
-  const shippingId = order.shipping?.id
   if (shippingId) {
     const costsRes = await fetchFn(`${ML_API_URL}/shipments/${shippingId}/costs`, { headers, cache: "no-store" })
     if (costsRes.ok) {
@@ -88,8 +130,8 @@ export async function fetchMlOrderCost(
     mlOrderId,
     saleFee: Math.round(saleFee * 100) / 100,
     shippingCost: Math.round(shippingCost * 100) / 100,
-    listingType: order.order_items?.[0]?.listing_type_id ?? null,
-    mlStatus: order.status ?? null,
-    raw: order,
+    listingType: orders[0]?.order_items?.[0]?.listing_type_id ?? null,
+    mlStatus: orders[0]?.status ?? null,
+    raw: orders.length === 1 ? orders[0] : orders,
   }
 }
