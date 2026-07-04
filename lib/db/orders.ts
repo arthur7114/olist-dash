@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm"
 import { getDb } from "./client"
 import { orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
+import { statusPorSituacao } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
 import { normalizarFormaPagamento } from "@/lib/pagamento"
 
@@ -63,7 +64,7 @@ function rowToPedido(r: typeof orders.$inferSelect): Pedido {
     taxaComissao: Number(r.taxaComissao),
     custoTotal: Number(r.custoTotal),
     quantidade: Number(r.quantidade),
-    statusPagamento: r.statusPagamento as StatusPagamento,
+    statusPagamento: statusPorSituacao(r.situacao, r.statusPagamento as StatusPagamento),
     data: r.data,
   }
 }

@@ -450,3 +450,17 @@ export function variacaoPct(atual: number, anterior: number): number | undefined
   if (!Number.isFinite(anterior) || anterior === 0) return undefined
   return (atual - anterior) / Math.abs(anterior)
 }
+
+// Situações Olist/Tiny: 0 Em aberto, 1 Faturado, 2 Cancelado, 3 Aprovado,
+// 4 Preparando envio, 5 Enviado, 6 Entregue, 7 Pronto p/ envio, 8 Dados incompletos.
+const SITUACOES_PAGAS = new Set([1, 3, 4, 5, 6, 7])
+
+export function statusPorSituacao(
+  situacao: number | null | undefined,
+  fallback: StatusPagamento,
+): StatusPagamento {
+  if (situacao === null || situacao === undefined) return fallback
+  if (situacao === 2) return "Estornado"
+  if (SITUACOES_PAGAS.has(situacao)) return "Pago"
+  return "Pendente"
+}

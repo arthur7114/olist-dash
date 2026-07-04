@@ -872,7 +872,7 @@ function getIntegratedPaymentName(type: number | undefined) {
 
 function getStatusPagamento(order: TinyOrderDetail): StatusPagamento {
   if (order.situacao === 2) return "Estornado"
-  if ([1, 5, 6].includes(order.situacao ?? -1)) return "Pago"
+  if ([1, 3, 4, 5, 6, 7].includes(order.situacao ?? -1)) return "Pago"
 
   const totalParcelas = order.pagamento?.parcelas?.reduce((sum, parcela) => sum + toNumber(parcela.valor), 0) ?? 0
   const totalPedido = toNumber(order.valorTotalPedido)
