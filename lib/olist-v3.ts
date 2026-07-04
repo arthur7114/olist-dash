@@ -1,4 +1,5 @@
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
+import { extractOrderItems, type SyncOrderItem } from "@/lib/olist-items"
 
 export const OLIST_AUTH_URL =
   "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth"
@@ -248,6 +249,7 @@ export type SyncOrder = {
   situacao?: number
   detailLevel: "full" | "summary"
   raw: TinyOrderDetail
+  itens: SyncOrderItem[]
 }
 
 export type SyncBatchHandler = (orders: SyncOrder[]) => Promise<unknown>
@@ -281,11 +283,16 @@ export async function syncOrdersIncremental(
     if (!batch.length) return
     const productCosts = await fetchProductCosts(accessToken, batch)
     const noPayments = new Map<string, string>()
+    const custoDe = (id?: number, sku?: string) =>
+      (id !== undefined ? productCosts.byId.get(id) : undefined) ??
+      (sku ? productCosts.bySku.get(sku) : undefined) ??
+      0
     const mapped: SyncOrder[] = batch.map((detail) => ({
       pedido: mapOrderToPedido(detail, productCosts, noPayments),
       situacao: detail.situacao,
       detailLevel: "full",
       raw: detail,
+      itens: extractOrderItems(detail, custoDe),
     }))
     await opts.onBatch(mapped)
     processed += mapped.length

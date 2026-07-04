@@ -5,6 +5,7 @@ import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import { statusPorSituacao } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
 import { normalizarFormaPagamento } from "@/lib/pagamento"
+import { replaceOrderItems } from "./orderItems"
 
 export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> {
   const db = getDb()
@@ -126,5 +127,10 @@ export async function upsertOrders(items: SyncOrder[]): Promise<number> {
       .values(rows.slice(i, i + CHUNK))
       .onConflictDoUpdate({ target: orders.olistId, set: ordersConflictSet })
   }
+
+  await replaceOrderItems(
+    items.map(({ pedido, itens }) => ({ olistId: pedido.id, data: pedido.data, itens })),
+  )
+
   return rows.length
 }

@@ -20,6 +20,14 @@ export interface Produto {
   custoMedio: number
 }
 
+export interface ItemPedido {
+  sku: string
+  descricao: string
+  quantidade: number
+  valorUnitario: number
+  custoUnitario: number
+}
+
 export interface Pedido {
   id: string
   numeroPedido: string
@@ -37,6 +45,8 @@ export interface Pedido {
   quantidade: number // qtd total de itens do pedido
   statusPagamento: StatusPagamento
   data: string // ISO date
+  itens?: ItemPedido[]
+  custoMlReal?: boolean // taxa/frete vieram da API do Mercado Livre (Task 15)
 }
 
 // ----------------------------------------------------------------------------
