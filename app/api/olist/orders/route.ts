@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { PEDIDOS } from "@/lib/data"
 import { hasDatabase } from "@/lib/db/client"
 import { getOrdersByPeriod } from "@/lib/db/orders"
+import { getItemsByPeriod } from "@/lib/db/orderItems"
 import { getSyncState } from "@/lib/db/syncState"
 import { normalizarPeriodo, rangePeriodo, rangePersonalizado } from "@/lib/periodo"
 
@@ -27,9 +28,14 @@ export async function GET(request: Request) {
   try {
     const range = periodo === "custom" && de && ate ? rangePersonalizado(de, ate) : rangePeriodo(periodo, new Date())
     const dataInicial = range.inicioAnterior ?? range.inicio ?? "1970-01-01"
-    const [pedidos, state] = await Promise.all([getOrdersByPeriod(dataInicial), getSyncState()])
+    const [pedidos, state, itensPorPedido] = await Promise.all([
+      getOrdersByPeriod(dataInicial),
+      getSyncState(),
+      getItemsByPeriod(dataInicial),
+    ])
+    const pedidosComItens = pedidos.map((p) => ({ ...p, itens: itensPorPedido.get(p.id) ?? [] }))
 
-    if (!pedidos.length) {
+    if (!pedidosComItens.length) {
       return NextResponse.json({
         source: "mock",
         authenticated: Boolean(state),
@@ -45,8 +51,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       source: "real",
       authenticated: true,
-      pedidos,
-      message: `${pedidos.length} pedidos carregados do banco.`,
+      pedidos: pedidosComItens,
+      message: `${pedidosComItens.length} pedidos carregados do banco.`,
       lastSync: state?.lastSuccessAt ?? null,
     })
   } catch (err) {
