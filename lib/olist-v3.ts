@@ -854,17 +854,17 @@ function getIntegratedPaymentName(type: number | undefined) {
   const paymentTypes: Record<number, string> = {
     1: "Dinheiro",
     2: "Cheque",
-    3: "CartÃ£o de crÃ©dito",
-    4: "CartÃ£o de dÃ©bito",
-    5: "CrÃ©dito loja",
-    10: "Vale alimentaÃ§Ã£o",
-    11: "Vale refeiÃ§Ã£o",
+    3: "Cartão de crédito",
+    4: "Cartão de débito",
+    5: "Crédito loja",
+    10: "Vale alimentação",
+    11: "Vale refeição",
     12: "Vale presente",
-    13: "Vale combustÃ­vel",
+    13: "Vale combustível",
     15: "Boleto",
-    16: "DepÃ³sito bancÃ¡rio",
+    16: "Depósito bancário",
     17: "Pix",
-    18: "TransferÃªncia",
+    18: "Transferência",
   }
 
   return paymentTypes[type]

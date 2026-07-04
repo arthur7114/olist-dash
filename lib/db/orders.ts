@@ -3,6 +3,7 @@ import { getDb } from "./client"
 import { orders } from "./schema"
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
+import { normalizarFormaPagamento } from "@/lib/pagamento"
 
 export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> {
   const db = getDb()
@@ -55,7 +56,7 @@ function rowToPedido(r: typeof orders.$inferSelect): Pedido {
     produto: r.produto,
     canal: r.canal,
     vendedor: r.vendedor,
-    formaPagamento: r.formaPagamento as FormaPagamento,
+    formaPagamento: normalizarFormaPagamento(r.formaPagamento) as FormaPagamento,
     valorVenda: Number(r.valorVenda),
     valorFrete: Number(r.valorFrete),
     devolucao: Number(r.devolucao),
