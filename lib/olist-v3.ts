@@ -57,7 +57,7 @@ type TinyOrderListItem = {
   }
 }
 
-type TinyOrderDetail = TinyOrderListItem & {
+export type TinyOrderDetail = TinyOrderListItem & {
   idNotaFiscal?: number
   data?: string
   dataFaturamento?: string
@@ -886,7 +886,7 @@ function normalizeDate(value: string | undefined) {
   return value.slice(0, 10)
 }
 
-function toNumber(value: unknown) {
+export function toNumber(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0
   if (typeof value !== "string") return 0
   const trimmed = value.trim()
