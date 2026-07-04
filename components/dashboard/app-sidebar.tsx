@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, ReceiptText, Store, BarChart3 } from "lucide-react"
+import { LayoutDashboard, ReceiptText, Store, BarChart3, Package } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -19,6 +19,7 @@ const itens = [
   { titulo: "Visão Geral", href: "/", icone: LayoutDashboard },
   { titulo: "Pedidos e NF", href: "/pedidos", icone: ReceiptText },
   { titulo: "Canais e Vendedores", href: "/canais", icone: Store },
+  { titulo: "Produtos e SKUs", href: "/produtos", icone: Package },
   { titulo: "Curva ABC", href: "/curva-abc", icone: BarChart3 },
 ]
 
