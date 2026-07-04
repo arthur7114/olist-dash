@@ -30,6 +30,29 @@ export const orders = pgTable(
   }),
 )
 
+// Itens de pedido, extraídos do JSON `raw` de orders. 1 linha por item.
+// `data` e denormalizada do pedido p/ filtrar por período sem join.
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: text("id").primaryKey(), // `${olistId}:${indice}`
+    olistId: text("olist_id").notNull(),
+    sku: text("sku").notNull().default("sem-sku"),
+    produtoOlistId: integer("produto_olist_id"),
+    descricao: text("descricao").notNull().default(""),
+    quantidade: integer("quantidade").notNull().default(1),
+    valorUnitario: numeric("valor_unitario", { precision: 14, scale: 2 }).notNull().default("0"),
+    custoUnitario: numeric("custo_unitario", { precision: 14, scale: 2 }).notNull().default("0"),
+    data: date("data").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    olistIdx: index("order_items_olist_idx").on(t.olistId),
+    dataIdx: index("order_items_data_idx").on(t.data),
+    skuIdx: index("order_items_sku_idx").on(t.sku),
+  }),
+)
+
 // Cache de custo de produto, persistente entre cold starts. ref = "id:123" ou "sku:ABC".
 export const productCosts = pgTable("product_costs", {
   ref: text("ref").primaryKey(),
