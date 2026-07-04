@@ -16,21 +16,22 @@ import { GlobalFilters } from "@/components/dashboard/global-filters"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { CanalBarChart, FaturamentoLucroChart } from "@/components/dashboard/overview-charts"
 import { useFiltros } from "@/lib/filters"
-import { calcularKPIs, formatBRL, formatMarkup, formatNumero, formatPercent } from "@/lib/data"
+import { calcularKPIs, formatBRL, formatMarkup, formatNumero, formatPercent, variacaoPct } from "@/lib/data"
 
 export default function VisaoGeralPage() {
-  const { pedidosFiltrados } = useFiltros()
+  const { pedidosFiltrados, pedidosPeriodoAnterior } = useFiltros()
   const kpi = calcularKPIs(pedidosFiltrados)
+  const kpiAnterior = calcularKPIs(pedidosPeriodoAnterior)
 
   const cards = [
-    { titulo: "Faturamento bruto", valor: formatBRL(kpi.faturamentoBruto), icone: DollarSign, variacao: 0.124, destaque: "positivo" as const, legenda: "vs. período anterior" },
-    { titulo: "Quantidade de pedidos", valor: formatNumero(kpi.quantidadePedidos), icone: ShoppingCart, variacao: 0.061, destaque: "default" as const, legenda: "pedidos no período" },
-    { titulo: "Valor total de frete", valor: formatBRL(kpi.totalFrete), icone: Truck, variacao: 0.028, destaque: "default" as const, legenda: "custo logístico" },
-    { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: -0.043, destaque: "alerta" as const, legenda: "vs. período anterior" },
-    { titulo: "Margem de contribuição", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: 0.097, destaque: "positivo" as const, legenda: "receita − custos/taxas variáveis" },
-    { titulo: "Ticket médio", valor: formatBRL(kpi.ticketMedio), icone: Receipt, variacao: 0.035, destaque: "default" as const, legenda: "por pedido" },
-    { titulo: "Margem de contribuição %", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: 0.018, destaque: "positivo" as const, legenda: "M.C. / receita líquida" },
-    { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: 0.012, destaque: "default" as const, legenda: "venda / custo" },
+    { titulo: "Faturamento bruto", valor: formatBRL(kpi.faturamentoBruto), icone: DollarSign, variacao: variacaoPct(kpi.faturamentoBruto, kpiAnterior.faturamentoBruto), destaque: "positivo" as const, legenda: "vs. período anterior" },
+    { titulo: "Quantidade de pedidos", valor: formatNumero(kpi.quantidadePedidos), icone: ShoppingCart, variacao: variacaoPct(kpi.quantidadePedidos, kpiAnterior.quantidadePedidos), destaque: "default" as const, legenda: "pedidos no período" },
+    { titulo: "Valor total de frete", valor: formatBRL(kpi.totalFrete), icone: Truck, variacao: variacaoPct(kpi.totalFrete, kpiAnterior.totalFrete), destaque: "default" as const, legenda: "custo logístico" },
+    { titulo: "Valor de devoluções", valor: formatBRL(kpi.totalDevolucoes), icone: Undo2, variacao: variacaoPct(kpi.totalDevolucoes, kpiAnterior.totalDevolucoes), destaque: "alerta" as const, legenda: "vs. período anterior" },
+    { titulo: "Margem de contribuição", valor: formatBRL(kpi.lucroBruto), icone: TrendingUp, variacao: variacaoPct(kpi.lucroBruto, kpiAnterior.lucroBruto), destaque: "positivo" as const, legenda: "receita − custos/taxas variáveis" },
+    { titulo: "Ticket médio", valor: formatBRL(kpi.ticketMedio), icone: Receipt, variacao: variacaoPct(kpi.ticketMedio, kpiAnterior.ticketMedio), destaque: "default" as const, legenda: "por pedido" },
+    { titulo: "Margem de contribuição %", valor: formatPercent(kpi.margemMedia), icone: Percent, variacao: variacaoPct(kpi.margemMedia, kpiAnterior.margemMedia), destaque: "positivo" as const, legenda: "M.C. / receita líquida" },
+    { titulo: "Markup médio", valor: formatMarkup(kpi.markupMedio), icone: Layers, variacao: variacaoPct(kpi.markupMedio, kpiAnterior.markupMedio), destaque: "default" as const, legenda: "venda / custo" },
   ]
 
   return (

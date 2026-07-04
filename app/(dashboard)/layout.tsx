@@ -38,7 +38,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </div>
             <div className="ml-auto flex items-center gap-3">
               <DataSourceStatus />
-              <span className="hidden text-xs text-muted-foreground sm:inline">Atualizado em 30/05/2026</span>
               <ThemeToggle />
             </div>
           </header>

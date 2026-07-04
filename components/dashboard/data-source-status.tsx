@@ -8,7 +8,7 @@ import { useFiltros } from "@/lib/filters"
 import { cn } from "@/lib/utils"
 
 export function DataSourceStatus() {
-  const { carregando, fonteDados, autenticado, mensagemDados } = useFiltros()
+  const { carregando, fonteDados, autenticado, mensagemDados, lastSync } = useFiltros()
   const usandoReal = fonteDados === "real"
 
   return (
@@ -25,6 +25,12 @@ export function DataSourceStatus() {
         {carregando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
         {carregando ? "Carregando" : usandoReal ? "Dados reais" : "Mock"}
       </span>
+
+      {lastSync && (
+        <span className="hidden text-xs text-muted-foreground md:inline">
+          Atualizado {new Date(lastSync).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+        </span>
+      )}
 
       {autenticado ? (
         <LogoutButton />
