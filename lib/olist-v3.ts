@@ -127,7 +127,7 @@ type TinyProductDetail = {
   }
 }
 
-// Item da listagem de notas fiscais (v3). Campos confirmados contra a API real na implementação.
+// Item da listagem de notas fiscais (v3). Campos (id/valor/valorNota) ainda NÃO confirmados contra a API real — ajustar ao integrar com um token válido.
 export type TinyNotaListItem = {
   id?: number
   valor?: number
