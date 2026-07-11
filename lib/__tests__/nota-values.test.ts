@@ -15,4 +15,13 @@ describe("indexNotaValues", () => {
     const m = indexNotaValues([{ valor: 100 }, { id: 13, valor: 0 }, { id: 14 }])
     expect(m.size).toBe(0)
   })
+
+  it("ignora notas canceladas (situacao 3)", () => {
+    const m = indexNotaValues([
+      { id: 15, valor: 200, situacao: 3 },
+      { id: 16, valor: 300, situacao: 6 },
+    ])
+    expect(m.has(15)).toBe(false)
+    expect(m.get(16)).toBe(300)
+  })
 })

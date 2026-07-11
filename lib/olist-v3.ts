@@ -128,17 +128,24 @@ type TinyProductDetail = {
 }
 
 // Item da listagem de notas fiscais (v3), confirmado contra o swagger público
-// (ListagemNotaFiscalModelResponse): id é integer, valor é number.
+// (ListagemNotaFiscalModelResponse): id é integer, valor é number. situacao é o
+// enum de status da nota (1 Pendente, 2 Emitida, 3 Cancelada, ... 10 Denegada).
 export type TinyNotaListItem = {
   id?: number
   valor?: number
+  situacao?: number | string
 }
 
-// Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas inválidas.
+const SITUACAO_NOTA_CANCELADA = 3
+
+// Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas
+// inválidas e notas canceladas (situacao 3) — uma NF cancelada não deve contar
+// como faturamento.
 export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> {
   const map = new Map<number, number>()
   for (const nota of notas) {
     if (nota.id == null) continue
+    if (Number(nota.situacao) === SITUACAO_NOTA_CANCELADA) continue
     const valor = toNumber(nota.valor)
     if (valor > 0) map.set(nota.id, valor)
   }
