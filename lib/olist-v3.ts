@@ -127,6 +127,24 @@ type TinyProductDetail = {
   }
 }
 
+// Item da listagem de notas fiscais (v3). Campos confirmados contra a API real na implementação.
+export type TinyNotaListItem = {
+  id?: number
+  valor?: number
+  valorNota?: number
+}
+
+// Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas inválidas.
+export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> {
+  const map = new Map<number, number>()
+  for (const nota of notas) {
+    if (nota.id == null) continue
+    const valor = toNumber(nota.valor) || toNumber(nota.valorNota)
+    if (valor > 0) map.set(nota.id, valor)
+  }
+  return map
+}
+
 type TinyProductListItem = TinyProductDetail & {
   descricao?: string
 }
@@ -274,6 +292,7 @@ export async function syncOrdersIncremental(
   const maxItems = opts.maxItems ?? 5000
   const batchSize = opts.batchSize ?? 25
   const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
+  const notaValues = await fetchNotaValuesRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
   let processed = 0
   let completed = true
@@ -288,7 +307,7 @@ export async function syncOrdersIncremental(
       (sku ? productCosts.bySku.get(sku) : undefined) ??
       0
     const mapped: SyncOrder[] = batch.map((detail) => ({
-      pedido: mapOrderToPedido(detail, productCosts, noPayments),
+      pedido: mapOrderToPedido(detail, productCosts, noPayments, notaValues),
       situacao: detail.situacao,
       detailLevel: "full",
       raw: detail,
@@ -333,8 +352,9 @@ export async function recomputeCostsForRaws(
   const details = raws as TinyOrderDetail[]
   const productCosts = await fetchProductCosts(accessToken, details)
   const noPayments = new Map<string, string>()
+  const noNotaValues = new Map<number, number>()
   return details.map((detail) => {
-    const pedido = mapOrderToPedido(detail, productCosts, noPayments)
+    const pedido = mapOrderToPedido(detail, productCosts, noPayments, noNotaValues)
     return { custoTotal: pedido.custoTotal, quantidade: pedido.quantidade }
   })
 }
@@ -393,6 +413,44 @@ async function fetchOrderListRange(
   }
 
   return items.slice(0, maxItems)
+}
+
+// Busca o valor das notas fiscais emitidas numa janela de datas e devolve id-da-nota → valor.
+// Paginação no mesmo molde de fetchOrderListRange. Não lança em 429 se já houver dados.
+export async function fetchNotaValuesRange(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<Map<number, number>> {
+  const notas: TinyNotaListItem[] = []
+  const limit = 100
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+
+  while (offset < total && notas.length < maxItems) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      orderBy: "desc",
+      dataInicialEmissao: dataInicial,
+      dataFinalEmissao: dataFinal,
+    })
+    let list: TinyListResponse<TinyNotaListItem>
+    try {
+      list = await tinyFetch<TinyListResponse<TinyNotaListItem>>(accessToken, `/notas?${params.toString()}`)
+    } catch (err) {
+      if (err instanceof TinyApiError && err.status === 429 && notas.length > 0) break
+      throw err
+    }
+    const pageItems = list.itens ?? []
+    notas.push(...pageItems)
+    total = list.paginacao?.total ?? notas.length
+    if (pageItems.length < limit) break
+    offset += limit
+  }
+
+  return indexNotaValues(notas.slice(0, maxItems))
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -506,6 +564,7 @@ function mapOrderToPedido(
   order: TinyOrderDetail,
   productCosts: ProductCostLookup,
   receivablePayments: Map<string, string>,
+  notaValues: Map<number, number>,
 ): Pedido {
   const itens = order.itens?.length ? order.itens : itemToMinimalDetail(order).itens ?? []
   const totalItens = itens.reduce(
@@ -544,6 +603,10 @@ function mapOrderToPedido(
     // aplica a estimativa por canal em tempo de leitura — ver taxaComissaoEfetiva).
     taxaComissao: roundMoney(getOlistFee(order)),
     custoTotal: roundMoney(custoTotal),
+    valorNota:
+      order.idNotaFiscal != null && notaValues.has(order.idNotaFiscal)
+        ? roundMoney(notaValues.get(order.idNotaFiscal)!)
+        : undefined,
     quantidade: Math.max(1, quantidade),
     statusPagamento: getStatusPagamento(order),
     data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
