@@ -292,7 +292,10 @@ export async function syncOrdersIncremental(
   const maxItems = opts.maxItems ?? 5000
   const batchSize = opts.batchSize ?? 25
   const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
-  const notaValues = await fetchNotaValuesRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
+  const notaValues =
+    items.length === 0
+      ? new Map<number, number>()
+      : await fetchNotaValuesRangeSafe(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
   let processed = 0
   let completed = true
@@ -451,6 +454,28 @@ export async function fetchNotaValuesRange(
   }
 
   return indexNotaValues(notas.slice(0, maxItems))
+}
+
+// Wrapper não-fatal para o sync principal: o schema do endpoint /notas ainda não foi
+// validado contra uma conta real, então qualquer falha (404 de rota errada, 400 de
+// parâmetro errado, erro de rede, etc.) aqui NÃO pode derrubar o sync de pedidos — o
+// valor da NF fica ausente nesta execução e é recuperável depois via o backfill
+// (que tem seu próprio tratamento de erro independente).
+async function fetchNotaValuesRangeSafe(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<Map<number, number>> {
+  try {
+    return await fetchNotaValuesRange(accessToken, dataInicial, dataFinal, maxItems)
+  } catch (err) {
+    console.warn(
+      "[olist-v3] fetchNotaValuesRange falhou; sync de pedidos continua sem valorNota nesta execução:",
+      err,
+    )
+    return new Map<number, number>()
+  }
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
