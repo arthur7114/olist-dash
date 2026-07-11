@@ -17,7 +17,7 @@ function pedido(over: Partial<Pedido>): Pedido {
     taxaComissao: 0,
     custoTotal: 0,
     quantidade: 1,
-    statusPagamento: "Aprovado",
+    statusPagamento: "Pago",
     data: "2026-07-01",
     ...over,
   }
