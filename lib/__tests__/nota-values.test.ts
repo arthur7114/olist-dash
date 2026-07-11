@@ -11,11 +11,6 @@ describe("indexNotaValues", () => {
     expect(m.get(11)).toBe(99)
   })
 
-  it("aceita o campo valorNota como alternativa a valor", () => {
-    const m = indexNotaValues([{ id: 12, valorNota: 42 }])
-    expect(m.get(12)).toBe(42)
-  })
-
   it("ignora notas sem id ou sem valor positivo", () => {
     const m = indexNotaValues([{ valor: 100 }, { id: 13, valor: 0 }, { id: 14 }])
     expect(m.size).toBe(0)

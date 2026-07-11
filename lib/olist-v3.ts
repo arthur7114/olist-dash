@@ -127,11 +127,11 @@ type TinyProductDetail = {
   }
 }
 
-// Item da listagem de notas fiscais (v3). Campos (id/valor/valorNota) ainda NÃO confirmados contra a API real — ajustar ao integrar com um token válido.
+// Item da listagem de notas fiscais (v3), confirmado contra o swagger público
+// (ListagemNotaFiscalModelResponse): id é integer, valor é number.
 export type TinyNotaListItem = {
   id?: number
   valor?: number
-  valorNota?: number
 }
 
 // Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas inválidas.
@@ -139,7 +139,7 @@ export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> 
   const map = new Map<number, number>()
   for (const nota of notas) {
     if (nota.id == null) continue
-    const valor = toNumber(nota.valor) || toNumber(nota.valorNota)
+    const valor = toNumber(nota.valor)
     if (valor > 0) map.set(nota.id, valor)
   }
   return map
@@ -418,7 +418,7 @@ async function fetchOrderListRange(
   return items.slice(0, maxItems)
 }
 
-// Busca o valor das notas fiscais emitidas numa janela de datas e devolve id-da-nota → valor.
+// Busca o valor das notas fiscais criadas numa janela de datas e devolve id-da-nota → valor.
 // Paginação no mesmo molde de fetchOrderListRange. Não lança em 429 se já houver dados.
 export async function fetchNotaValuesRange(
   accessToken: string,
@@ -436,8 +436,11 @@ export async function fetchNotaValuesRange(
       limit: String(limit),
       offset: String(offset),
       orderBy: "desc",
-      dataInicialEmissao: dataInicial,
-      dataFinalEmissao: dataFinal,
+      // Confirmado no swagger público da v3 (erp.tiny.com.br/public-api/v3/swagger/swagger.json):
+      // os parâmetros do /notas são dataInicial/dataFinal (busca por data de criação), não
+      // dataInicialEmissao/dataFinalEmissao.
+      dataInicial,
+      dataFinal,
     })
     let list: TinyListResponse<TinyNotaListItem>
     try {
@@ -456,11 +459,11 @@ export async function fetchNotaValuesRange(
   return indexNotaValues(notas.slice(0, maxItems))
 }
 
-// Wrapper não-fatal para o sync principal: o schema do endpoint /notas ainda não foi
-// validado contra uma conta real, então qualquer falha (404 de rota errada, 400 de
-// parâmetro errado, erro de rede, etc.) aqui NÃO pode derrubar o sync de pedidos — o
-// valor da NF fica ausente nesta execução e é recuperável depois via o backfill
-// (que tem seu próprio tratamento de erro independente).
+// Wrapper não-fatal para o sync principal: mesmo com o schema do /notas confirmado
+// contra o swagger público, uma conta real pode falhar por permissão, rate limit ou
+// rede — isso aqui NÃO pode derrubar o sync de pedidos. O valor da NF fica ausente
+// nesta execução e é recuperável depois via o backfill (que tem seu próprio
+// tratamento de erro independente).
 async function fetchNotaValuesRangeSafe(
   accessToken: string,
   dataInicial: string,
