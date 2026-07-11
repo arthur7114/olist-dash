@@ -42,6 +42,7 @@ export interface Pedido {
   devolucao: number
   taxaComissao: number // taxa/comissão em R$ aplicada (ML, vendedores); 0 = não capturado da Olist
   custoTotal: number // custo dos produtos vendidos
+  valorNota?: number // valor da NF emitida (R$); undefined = sem NF / não capturado
   quantidade: number // qtd total de itens do pedido
   statusPagamento: StatusPagamento
   data: string // ISO date
@@ -473,4 +474,15 @@ export function statusPorSituacao(
   if (situacao === 2) return "Estornado"
   if (SITUACOES_PAGAS.has(situacao)) return "Pago"
   return "Pendente"
+}
+
+// Base de valor usada nos números do dashboard: valor de venda (padrão) ou valor da NF.
+export type BaseValor = "venda" | "nota"
+
+// Troca a base monetária "na fonte": em modo "nota", cada pedido passa a expor o valor
+// da NF em valorVenda (0 quando não há NF), de modo que TODA agregação que lê valorVenda
+// (KPIs, séries, curva ABC, devoluções) reflita a nova base sem alteração própria.
+export function aplicarBaseValor(pedidos: Pedido[], base: BaseValor): Pedido[] {
+  if (base === "venda") return pedidos
+  return pedidos.map((p) => ({ ...p, valorVenda: p.valorNota ?? 0 }))
 }
