@@ -127,6 +127,31 @@ type TinyProductDetail = {
   }
 }
 
+// Item da listagem de notas fiscais (v3), confirmado contra o swagger público
+// (ListagemNotaFiscalModelResponse): id é integer, valor é number. situacao é o
+// enum de status da nota (1 Pendente, 2 Emitida, 3 Cancelada, ... 10 Denegada).
+export type TinyNotaListItem = {
+  id?: number
+  valor?: number
+  situacao?: number | string
+}
+
+const SITUACAO_NOTA_CANCELADA = 3
+
+// Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas
+// inválidas e notas canceladas (situacao 3) — uma NF cancelada não deve contar
+// como faturamento.
+export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> {
+  const map = new Map<number, number>()
+  for (const nota of notas) {
+    if (nota.id == null) continue
+    if (Number(nota.situacao) === SITUACAO_NOTA_CANCELADA) continue
+    const valor = toNumber(nota.valor)
+    if (valor > 0) map.set(nota.id, valor)
+  }
+  return map
+}
+
 type TinyProductListItem = TinyProductDetail & {
   descricao?: string
 }
@@ -274,6 +299,10 @@ export async function syncOrdersIncremental(
   const maxItems = opts.maxItems ?? 5000
   const batchSize = opts.batchSize ?? 25
   const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
+  const notaValues =
+    items.length === 0
+      ? new Map<number, number>()
+      : await fetchNotaValuesRangeSafe(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
   let processed = 0
   let completed = true
@@ -288,7 +317,7 @@ export async function syncOrdersIncremental(
       (sku ? productCosts.bySku.get(sku) : undefined) ??
       0
     const mapped: SyncOrder[] = batch.map((detail) => ({
-      pedido: mapOrderToPedido(detail, productCosts, noPayments),
+      pedido: mapOrderToPedido(detail, productCosts, noPayments, notaValues),
       situacao: detail.situacao,
       detailLevel: "full",
       raw: detail,
@@ -333,8 +362,9 @@ export async function recomputeCostsForRaws(
   const details = raws as TinyOrderDetail[]
   const productCosts = await fetchProductCosts(accessToken, details)
   const noPayments = new Map<string, string>()
+  const noNotaValues = new Map<number, number>()
   return details.map((detail) => {
-    const pedido = mapOrderToPedido(detail, productCosts, noPayments)
+    const pedido = mapOrderToPedido(detail, productCosts, noPayments, noNotaValues)
     return { custoTotal: pedido.custoTotal, quantidade: pedido.quantidade }
   })
 }
@@ -393,6 +423,69 @@ async function fetchOrderListRange(
   }
 
   return items.slice(0, maxItems)
+}
+
+// Busca o valor das notas fiscais criadas numa janela de datas e devolve id-da-nota → valor.
+// Paginação no mesmo molde de fetchOrderListRange. Não lança em 429 se já houver dados.
+export async function fetchNotaValuesRange(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<Map<number, number>> {
+  const notas: TinyNotaListItem[] = []
+  const limit = 100
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+
+  while (offset < total && notas.length < maxItems) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      orderBy: "desc",
+      // Confirmado no swagger público da v3 (erp.tiny.com.br/public-api/v3/swagger/swagger.json):
+      // os parâmetros do /notas são dataInicial/dataFinal (busca por data de criação), não
+      // dataInicialEmissao/dataFinalEmissao.
+      dataInicial,
+      dataFinal,
+    })
+    let list: TinyListResponse<TinyNotaListItem>
+    try {
+      list = await tinyFetch<TinyListResponse<TinyNotaListItem>>(accessToken, `/notas?${params.toString()}`)
+    } catch (err) {
+      if (err instanceof TinyApiError && err.status === 429 && notas.length > 0) break
+      throw err
+    }
+    const pageItems = list.itens ?? []
+    notas.push(...pageItems)
+    total = list.paginacao?.total ?? notas.length
+    if (pageItems.length < limit) break
+    offset += limit
+  }
+
+  return indexNotaValues(notas.slice(0, maxItems))
+}
+
+// Wrapper não-fatal para o sync principal: mesmo com o schema do /notas confirmado
+// contra o swagger público, uma conta real pode falhar por permissão, rate limit ou
+// rede — isso aqui NÃO pode derrubar o sync de pedidos. O valor da NF fica ausente
+// nesta execução e é recuperável depois via o backfill (que tem seu próprio
+// tratamento de erro independente).
+async function fetchNotaValuesRangeSafe(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<Map<number, number>> {
+  try {
+    return await fetchNotaValuesRange(accessToken, dataInicial, dataFinal, maxItems)
+  } catch (err) {
+    console.warn(
+      "[olist-v3] fetchNotaValuesRange falhou; sync de pedidos continua sem valorNota nesta execução:",
+      err,
+    )
+    return new Map<number, number>()
+  }
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -506,6 +599,7 @@ function mapOrderToPedido(
   order: TinyOrderDetail,
   productCosts: ProductCostLookup,
   receivablePayments: Map<string, string>,
+  notaValues: Map<number, number>,
 ): Pedido {
   const itens = order.itens?.length ? order.itens : itemToMinimalDetail(order).itens ?? []
   const totalItens = itens.reduce(
@@ -544,6 +638,10 @@ function mapOrderToPedido(
     // aplica a estimativa por canal em tempo de leitura — ver taxaComissaoEfetiva).
     taxaComissao: roundMoney(getOlistFee(order)),
     custoTotal: roundMoney(custoTotal),
+    valorNota:
+      order.idNotaFiscal != null && notaValues.has(order.idNotaFiscal)
+        ? roundMoney(notaValues.get(order.idNotaFiscal)!)
+        : undefined,
     quantidade: Math.max(1, quantidade),
     statusPagamento: getStatusPagamento(order),
     data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),

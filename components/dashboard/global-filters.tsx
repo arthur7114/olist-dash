@@ -14,6 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
 import { VENDEDORES_POR_CANAL, formatData } from "@/lib/data"
 import { useFiltros } from "@/lib/filters"
 import type { PeriodoOpcao } from "@/lib/periodo"
@@ -35,7 +37,7 @@ function dataParaChave(d: Date): string {
 }
 
 export function GlobalFilters() {
-  const { filtros, setFiltro, setPeriodoPersonalizado, limpar, opcoes } = useFiltros()
+  const { filtros, setFiltro, setPeriodoPersonalizado, limpar, opcoes, baseValor, setBaseValor } = useFiltros()
   const [popoverAberto, setPopoverAberto] = useState(false)
   const [rascunho, setRascunho] = useState<DateRange | undefined>(undefined)
 
@@ -183,10 +185,28 @@ export function GlobalFilters() {
         </SelectContent>
       </Select>
 
-      <Button variant="ghost" size="sm" onClick={limpar} className="ml-auto gap-1.5 text-muted-foreground">
-        <RotateCcw className="size-3.5" />
-        Limpar
-      </Button>
+      <div className="ml-auto flex items-center gap-3">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Valor de venda</span>
+          <Switch
+            checked={baseValor === "nota"}
+            onCheckedChange={(on) => setBaseValor(on ? "nota" : "venda")}
+            aria-label="Alternar base entre valor de venda e valor de nota fiscal"
+          />
+          <span className="flex items-center gap-1">
+            Valor de NF
+            {baseValor === "nota" && (
+              <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                NF
+              </Badge>
+            )}
+          </span>
+        </label>
+        <Button variant="ghost" size="sm" onClick={limpar} className="gap-1.5 text-muted-foreground">
+          <RotateCcw className="size-3.5" />
+          Limpar
+        </Button>
+      </div>
     </section>
   )
 }

@@ -7,6 +7,8 @@ import {
   PEDIDOS,
   PRODUTOS,
   VENDEDORES_POR_CANAL,
+  aplicarBaseValor,
+  type BaseValor,
   type Canal,
   type FormaPagamento,
   type Pedido,
@@ -31,6 +33,8 @@ interface FiltrosContextValue {
   setFiltro: <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => void
   setPeriodoPersonalizado: (inicio: string, fim: string) => void
   limpar: () => void
+  baseValor: BaseValor
+  setBaseValor: (base: BaseValor) => void
   pedidosFiltrados: Pedido[]
   pedidosPeriodoAnterior: Pedido[]
   totalSemFiltro: number
@@ -67,6 +71,18 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [autenticado, setAutenticado] = useState(false)
   const [mensagemDados, setMensagemDados] = useState<string>()
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const [baseValor, setBaseValorState] = useState<BaseValor>("venda")
+
+  // Restaura a base escolhida ao montar (persistida entre sessões).
+  useEffect(() => {
+    const salvo = window.localStorage.getItem("baseValor")
+    if (salvo === "nota" || salvo === "venda") setBaseValorState(salvo)
+  }, [])
+
+  const setBaseValor = (base: BaseValor) => {
+    setBaseValorState(base)
+    window.localStorage.setItem("baseValor", base)
+  }
 
   // Período customizado ainda sem as duas datas escolhidas: não busca (evita
   // refetch a cada clique no calendário antes do usuário fechar o intervalo).
@@ -162,21 +178,27 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
 
   const pedidosFiltrados = useMemo(
     () =>
-      pedidos.filter((p) => {
-        if (range.inicio && p.data < range.inicio) return false
-        if (range.fim && p.data > range.fim) return false
-        return passaDimensoes(p)
-      }),
-    [pedidos, range, passaDimensoes],
+      aplicarBaseValor(
+        pedidos.filter((p) => {
+          if (range.inicio && p.data < range.inicio) return false
+          if (range.fim && p.data > range.fim) return false
+          return passaDimensoes(p)
+        }),
+        baseValor,
+      ),
+    [pedidos, range, passaDimensoes, baseValor],
   )
 
   // Mesmos filtros dimensionais na janela anterior — base do "vs. período anterior".
   const pedidosPeriodoAnterior = useMemo(() => {
     if (!range.inicioAnterior || !range.fimAnterior) return []
-    return pedidos.filter(
-      (p) => p.data >= range.inicioAnterior! && p.data <= range.fimAnterior! && passaDimensoes(p),
+    return aplicarBaseValor(
+      pedidos.filter(
+        (p) => p.data >= range.inicioAnterior! && p.data <= range.fimAnterior! && passaDimensoes(p),
+      ),
+      baseValor,
     )
-  }, [pedidos, range, passaDimensoes])
+  }, [pedidos, range, passaDimensoes, baseValor])
 
   const opcoes = useMemo(() => {
     const canais = uniqueSorted([...CANAIS, ...pedidos.map((p) => p.canal)])
@@ -208,6 +230,8 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     setFiltro,
     setPeriodoPersonalizado,
     limpar,
+    baseValor,
+    setBaseValor,
     pedidosFiltrados,
     pedidosPeriodoAnterior,
     totalSemFiltro: pedidos.length,
