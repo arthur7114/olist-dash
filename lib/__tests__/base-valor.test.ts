@@ -47,3 +47,14 @@ describe("aplicarBaseValor", () => {
     expect(pedidos[0].valorVenda).toBe(100)
   })
 })
+
+describe("aplicarBaseValor — composição com agregação", () => {
+  it("soma de valorVenda no modo nota usa valorNota (0 quando ausente)", () => {
+    const pedidos = [
+      pedido({ id: "a", valorVenda: 100, valorNota: 90 }),
+      pedido({ id: "b", valorVenda: 50, valorNota: undefined }),
+    ]
+    const total = aplicarBaseValor(pedidos, "nota").reduce((s, p) => s + p.valorVenda, 0)
+    expect(total).toBe(90)
+  })
+})
