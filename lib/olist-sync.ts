@@ -1,13 +1,22 @@
 import {
   exportProductCostCache,
+  fetchNotaValuesRange,
   primeProductCostCache,
   recomputeCostsForRaws,
   refreshAccessToken,
   syncOrdersIncremental,
+  type TinyOrderDetail,
 } from "@/lib/olist-v3"
 import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
 import { saveSyncState } from "@/lib/db/syncState"
-import { getExistingOrderIds, getOrdersMissingCost, updateOrderCost, upsertOrders } from "@/lib/db/orders"
+import {
+  getExistingOrderIds,
+  getOrdersMissingCost,
+  getOrdersMissingNotaValue,
+  updateOrderCost,
+  updateOrderNotaValue,
+  upsertOrders,
+} from "@/lib/db/orders"
 import { getAllProductCosts, saveProductCosts } from "@/lib/db/productCosts"
 
 export type SyncSummary = {
@@ -155,6 +164,63 @@ export async function runRecomputeCosts(): Promise<RecomputeSummary> {
 
   // Persiste custos recém-descobertos para acelerar as próximas execuções.
   await saveProductCosts(exportProductCostCache())
+
+  return {
+    ok: true,
+    totalMissing: all.length,
+    scanned,
+    updated,
+    remaining: all.length - scanned,
+    completed,
+    elapsedMs: Date.now() - startedAt,
+  }
+}
+
+// Preenche valorNota dos pedidos já sincronizados a partir do idNotaFiscal salvo no raw.
+// Busca os valores por janela (min..max das datas do lote) e atualiza pedido a pedido.
+// Resumível: rode de novo até completed=true.
+export async function runBackfillNotas(): Promise<{
+  ok: true
+  totalMissing: number
+  scanned: number
+  updated: number
+  remaining: number
+  completed: boolean
+  elapsedMs: number
+}> {
+  const startedAt = Date.now()
+  const deadline = startedAt + BUDGET_MS
+
+  const creds = await getStoredCredentials()
+  if (!creds) throw new Error("Sem credenciais Olist no banco. Conecte a conta pelo dashboard primeiro.")
+  const refreshed = await refreshAccessToken(creds.refreshToken)
+  await saveCredentials(refreshed)
+  const accessToken = refreshed.access_token
+
+  const all = await getOrdersMissingNotaValue(3000)
+  let scanned = 0
+  let updated = 0
+  let completed = true
+  const CHUNK = 200
+
+  for (let i = 0; i < all.length; i += CHUNK) {
+    if (Date.now() >= deadline) {
+      completed = false
+      break
+    }
+    const slice = all.slice(i, i + CHUNK)
+    const datas = slice.map((o) => o.data).sort()
+    const notaValues = await fetchNotaValuesRange(accessToken, datas[0], datas[datas.length - 1], 5000)
+    for (const o of slice) {
+      scanned += 1
+      const idNota = (o.raw as TinyOrderDetail)?.idNotaFiscal
+      const valor = idNota != null ? notaValues.get(idNota) : undefined
+      if (valor && valor > 0) {
+        await updateOrderNotaValue(o.olistId, valor)
+        updated += 1
+      }
+    }
+  }
 
   return {
     ok: true,
