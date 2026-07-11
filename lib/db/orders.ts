@@ -40,6 +40,29 @@ export async function updateOrderCost(olistId: string, custoTotal: number, quant
     .where(eq(orders.olistId, olistId))
 }
 
+// Pedidos ainda sem valorNota mas com detalhe salvo (para o backfill de NF).
+// raw traz idNotaFiscal, mas NÃO o valor da NF — o backfill precisa buscá-lo na API.
+export async function getOrdersMissingNotaValue(
+  limit: number,
+): Promise<Array<{ olistId: string; data: string; raw: unknown }>> {
+  const db = getDb()
+  return db
+    .select({ olistId: orders.olistId, data: orders.data, raw: orders.raw })
+    .from(orders)
+    .where(sql`${orders.valorNota} is null and ${orders.raw} is not null`)
+    .orderBy(asc(orders.data))
+    .limit(limit)
+}
+
+// Atualiza só o valorNota de um pedido (usado pelo backfill de NF).
+export async function updateOrderNotaValue(olistId: string, valorNota: number): Promise<void> {
+  const db = getDb()
+  await db
+    .update(orders)
+    .set({ valorNota: String(valorNota), updatedAt: new Date() })
+    .where(eq(orders.olistId, olistId))
+}
+
 // IDs de pedidos já no banco numa janela — usado para o backfill pular o que já foi sincronizado.
 export async function getExistingOrderIds(dataInicial: string, dataFinal: string): Promise<Set<string>> {
   const db = getDb()
@@ -72,6 +95,7 @@ function rowToPedido(
     devolucao: Number(r.devolucao),
     taxaComissao: custoMlReal ? saleFee : Number(r.taxaComissao),
     custoTotal: Number(r.custoTotal),
+    valorNota: r.valorNota == null ? undefined : Number(r.valorNota),
     quantidade: Number(r.quantidade),
     statusPagamento: statusPorSituacao(r.situacao, r.statusPagamento as StatusPagamento),
     data: r.data,
@@ -94,6 +118,7 @@ const ordersConflictSet = {
   devolucao: sql`excluded.devolucao`,
   taxaComissao: sql`excluded.taxa_comissao`,
   custoTotal: sql`excluded.custo_total`,
+  valorNota: sql`excluded.valor_nota`,
   quantidade: sql`excluded.quantidade`,
   data: sql`excluded.data`,
   situacao: sql`excluded.situacao`,
@@ -121,6 +146,7 @@ export async function upsertOrders(items: SyncOrder[]): Promise<number> {
     devolucao: String(pedido.devolucao),
     taxaComissao: String(pedido.taxaComissao),
     custoTotal: String(pedido.custoTotal),
+    valorNota: pedido.valorNota == null ? null : String(pedido.valorNota),
     quantidade: pedido.quantidade,
     data: pedido.data,
     situacao: situacao ?? null,

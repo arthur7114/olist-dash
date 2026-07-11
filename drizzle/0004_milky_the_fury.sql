@@ -1,0 +1,1 @@
+ALTER TABLE "orders" ADD COLUMN "valor_nota" numeric(14, 2);
