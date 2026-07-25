@@ -10,7 +10,7 @@ import {
 import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
 import { saveSyncState } from "@/lib/db/syncState"
 import {
-  getExistingOrderIds,
+  getBackfillSkipIds,
   getOrdersMissingCost,
   getOrdersMissingNotaValue,
   updateOrderCost,
@@ -34,6 +34,10 @@ export type SyncSummary = {
 const BUDGET_MS = Number(process.env.OLIST_SYNC_BUDGET_MS) || 230_000
 const RECENT_DAYS = Number(process.env.OLIST_SYNC_RECENT_DAYS) || 15
 const BACKFILL_DAYS = Number(process.env.OLIST_SYNC_BACKFILL_DAYS) || 90
+// Idade máxima de um pedido ainda mutável antes de ser revisto pelo backfill. 72h mantém
+// a carga diária (~1/3 do backlog) bem abaixo da capacidade da janela de execução, e a
+// janela recente já cobre os pedidos novos todos os dias.
+const REFRESH_STALE_HOURS = Number(process.env.OLIST_REFRESH_STALE_HOURS) || 72
 
 function fmt(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -76,15 +80,17 @@ export async function runSync(opts: { full?: boolean } = {}): Promise<SyncSummar
   processed += recent.processed
 
   // 2. Backfill (janela mais antiga), só se a recente terminou e ainda há orçamento.
-  //    Pula pedidos já no banco (resumível) — a não ser que full=1 force reprocessar.
+  //    Pula o que está liquidado ou foi revisto há menos de REFRESH_STALE_HOURS — o resto
+  //    é rebuscado. É isso que mantém situação, valor e NF em dia depois que o pedido sai
+  //    da janela recente (curta em produção: RECENT_DAYS=2). Com full=1, refaz tudo.
   let backfillDone = false
   if (recent.completed && Date.now() < deadline) {
-    const existing = opts.full ? null : await getExistingOrderIds(target, recentStart)
+    const skip = opts.full ? null : await getBackfillSkipIds(target, recentStart, REFRESH_STALE_HOURS)
     const back = await syncOrdersIncremental(accessToken, {
       dataInicial: target,
       dataFinal: recentStart,
       deadline,
-      skip: existing ? (id) => existing.has(id) : undefined,
+      skip: skip ? (id) => skip.has(id) : undefined,
       onBatch: upsertOrders,
     })
     processed += back.processed

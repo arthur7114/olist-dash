@@ -5,6 +5,7 @@ import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import { statusPorSituacao } from "@/lib/data"
 import type { SyncOrder } from "@/lib/olist-v3"
 import { normalizarFormaPagamento } from "@/lib/pagamento"
+import type { ReconcileRow } from "@/lib/reconcile"
 import { replaceOrderItems } from "./orderItems"
 
 export async function getOrdersByPeriod(dataInicial: string): Promise<Pedido[]> {
@@ -63,13 +64,70 @@ export async function updateOrderNotaValue(olistId: string, valorNota: number): 
     .where(eq(orders.olistId, olistId))
 }
 
-// IDs de pedidos já no banco numa janela — usado para o backfill pular o que já foi sincronizado.
-export async function getExistingOrderIds(dataInicial: string, dataFinal: string): Promise<Set<string>> {
+// Pedidos de uma janela com o detalhe cru, para a reconciliação dash × Olist.
+// Traz `raw` porque é lá que estão os outros totais do pedido (produtos, total,
+// frete, desconto) contra os quais a base do dash é comparada.
+export async function getOrdersForReconcile(
+  dataInicial: string,
+  dataFinal: string,
+): Promise<ReconcileRow[]> {
+  const db = getDb()
+  const rows = await db
+    .select({
+      olistId: orders.olistId,
+      data: orders.data,
+      situacao: orders.situacao,
+      valorVenda: orders.valorVenda,
+      valorNota: orders.valorNota,
+      updatedAt: orders.updatedAt,
+      raw: orders.raw,
+    })
+    .from(orders)
+    .where(and(gte(orders.data, dataInicial), lte(orders.data, dataFinal)))
+    .orderBy(desc(orders.data))
+  return rows.map((r) => ({
+    olistId: r.olistId,
+    data: r.data,
+    situacao: r.situacao,
+    valorVenda: Number(r.valorVenda),
+    valorNota: r.valorNota == null ? null : Number(r.valorNota),
+    updatedAt: r.updatedAt.toISOString(),
+    raw: r.raw,
+  }))
+}
+
+// Pedidos que o backfill pode pular nesta execução. Pular por "já existe no banco"
+// congelava o pedido no estado que ele tinha ~48h após a criação (a janela recente é
+// curta): a NF sai depois e nunca era gravada, a situação parava em "Em aberto", e
+// mudanças de valor/cancelamento ficavam invisíveis.
+//
+// Duas razões para pular:
+//   1. LIQUIDADO — não há mais o que buscar na Olist (ver pedidoLiquidado em reconcile.ts):
+//      cancelado (2), ou entregue (6) com valor de NF já capturado.
+//   2. RECÉM-ATUALIZADO — revisto há menos de `staleHours`. Esta cláusula é o que garante
+//      AVANÇO: sem ela, o orçamento de tempo é gasto sempre nos mesmos pedidos do início
+//      da lista (que vem em ordem decrescente de data) e a cauda nunca é alcançada —
+//      um pedido entregue sem NF, por exemplo, nunca liquida e travaria a fila.
+export async function getBackfillSkipIds(
+  dataInicial: string,
+  dataFinal: string,
+  staleHours: number,
+): Promise<Set<string>> {
   const db = getDb()
   const rows = await db
     .select({ id: orders.olistId })
     .from(orders)
-    .where(and(gte(orders.data, dataInicial), lte(orders.data, dataFinal)))
+    .where(
+      and(
+        gte(orders.data, dataInicial),
+        lte(orders.data, dataFinal),
+        sql`(
+          ${orders.situacao} = 2
+          or (${orders.situacao} = 6 and ${orders.valorNota} is not null)
+          or ${orders.updatedAt} >= now() - make_interval(hours => ${staleHours})
+        )`,
+      ),
+    )
   return new Set(rows.map((r) => r.id))
 }
 
