@@ -1,4 +1,4 @@
-import { pgTable, text, integer, numeric, date, timestamp, jsonb, index } from "drizzle-orm/pg-core"
+import { pgTable, text, integer, numeric, date, timestamp, jsonb, index, primaryKey } from "drizzle-orm/pg-core"
 
 // Pedidos sincronizados da Olist. Espelha o tipo `Pedido` (lib/data.ts) + bookkeeping.
 export const orders = pgTable(
@@ -65,6 +65,40 @@ export const mlOrderCosts = pgTable("ml_order_costs", {
   mlStatus: text("ml_status"),
   raw: jsonb("raw"),
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Agregado mensal direto do Mercado Livre para a visão Evolução de produtos.
+// Mantém as duas bases lado a lado para a alternância ser instantânea no cliente.
+export const mlProductMonthlyMetrics = pgTable(
+  "ml_product_monthly_metrics",
+  {
+    month: date("month").notNull(),
+    productKey: text("product_key").notNull(),
+    title: text("title").notNull().default(""),
+    itemIds: jsonb("item_ids").$type<string[]>().notNull().default([]),
+    createdOrders: integer("created_orders").notNull().default(0),
+    createdUnits: integer("created_units").notNull().default(0),
+    createdRevenue: numeric("created_revenue", { precision: 16, scale: 2 }).notNull().default("0"),
+    paidOrders: integer("paid_orders").notNull().default(0),
+    paidUnits: integer("paid_units").notNull().default(0),
+    paidRevenue: numeric("paid_revenue", { precision: 16, scale: 2 }).notNull().default("0"),
+    visits: integer("visits"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.month, t.productKey] }),
+    monthIdx: index("ml_product_monthly_metrics_month_idx").on(t.month),
+  }),
+)
+
+export const mlProductEvolutionSyncState = pgTable("ml_product_evolution_sync_state", {
+  id: integer("id").primaryKey().default(1),
+  status: text("status").notNull().default("idle"),
+  cursorMonth: text("cursor_month"),
+  coveredMonths: jsonb("covered_months").$type<string[]>().notNull().default([]),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastError: text("last_error"),
 })
 
 // Cache de custo de produto, persistente entre cold starts. ref = "id:123" ou "sku:ABC".

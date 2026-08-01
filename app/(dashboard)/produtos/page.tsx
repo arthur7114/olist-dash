@@ -5,12 +5,14 @@ import { AlertTriangle, Boxes, PackageX, Percent, Trophy } from "lucide-react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageTitle } from "@/components/dashboard/page-title"
 import { GlobalFilters } from "@/components/dashboard/global-filters"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { DataTable } from "@/components/dashboard/data-table"
 import { SkuDrawer } from "@/components/dashboard/sku-drawer"
 import { MatrizFaturamentoMargemChart, TopSkusChart } from "@/components/dashboard/sku-charts"
+import { ProductEvolution } from "@/components/dashboard/product-evolution"
 import { useFiltros } from "@/lib/filters"
 import { agregarPorSku, type LinhaSku } from "@/lib/sku-analytics"
 import { formatBRL, formatMarkup, formatNumero, formatPercent } from "@/lib/data"
@@ -80,60 +82,73 @@ export default function ProdutosPage() {
     <>
       <PageTitle
         titulo="Produtos e SKUs"
-        descricao="Venda, devolução e margem por SKU — clique em uma linha para abrir o detalhe."
+        descricao="Desempenho atual e evolução mensal dos produtos, com as definições de receita sempre visíveis."
       />
-      <GlobalFilters />
+      <Tabs defaultValue="resumo" className="gap-6">
+        <TabsList aria-label="Visões de produtos">
+          <TabsTrigger value="resumo">Resumo</TabsTrigger>
+          <TabsTrigger value="evolucao">Evolução</TabsTrigger>
+        </TabsList>
 
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {cards.map((c) => (
-          <KpiCard key={c.titulo} {...c} />
-        ))}
-      </section>
+        <TabsContent value="resumo" className="space-y-6">
+          <GlobalFilters />
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <TopSkusChart linhas={linhas} titulo="Top SKUs por faturamento" descricao="10 maiores no período" metrica="faturamento" />
-        <TopSkusChart linhas={linhas} titulo="Top SKUs devolvidos" descricao="10 maiores valores devolvidos" metrica="devolucaoValor" />
-      </section>
+          <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {cards.map((c) => (
+              <KpiCard key={c.titulo} {...c} />
+            ))}
+          </section>
 
-      <MatrizFaturamentoMargemChart linhas={linhas} />
+          <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <TopSkusChart linhas={linhas} titulo="Top SKUs por faturamento" descricao="10 maiores no período" metrica="faturamento" />
+            <TopSkusChart linhas={linhas} titulo="Top SKUs devolvidos" descricao="10 maiores valores devolvidos" metrica="devolucaoValor" />
+          </section>
 
-      <Card className="gap-0 overflow-hidden p-0">
-        <DataTable
-          tableId="produtos"
-          columns={colunas}
-          data={linhas}
-          buscaPlaceholder="Buscar SKU ou produto"
-          onRowClick={setSelecionado}
-          destacarLinha={(l) => l.alertas.length > 0}
-          vazio="Nenhum SKU no período/filtros selecionados."
-          csv={{
-            nome: "produtos-skus",
-            linhas: (rows) =>
-              rows.map((l) => ({
-                SKU: l.sku, Produto: l.produto, Canais: l.canais.join(", "),
-                "Qtd vendida": l.qtdVendida, "Qtd devolvida": l.qtdDevolvida, Pedidos: l.pedidos,
-                Faturamento: l.faturamento, "Devolução R$": l.devolucaoValor, "Faturamento líquido": l.faturamentoLiquido,
-                Custo: l.custoTotal, "Taxas rateadas": l.taxaAlocada, "Frete rateado": l.freteAlocado,
-                "Margem R$": l.margemValor, "Margem %": l.margemPct, Markup: l.markup,
-                "Ticket médio": l.ticketMedio, "Taxa devolução": l.taxaDevolucao,
-                Alertas: l.alertas.join("|"),
-              })),
-          }}
-          rodape={(rows) => (
-            <div className="flex flex-wrap items-center justify-end gap-x-8 gap-y-2">
-              <span className="text-muted-foreground">
-                SKUs: <span className="font-semibold text-foreground">{formatNumero(rows.length)}</span>
-              </span>
-              <span className="text-muted-foreground">
-                Faturamento: <span className="font-semibold text-foreground tabular-nums">{formatBRL(rows.reduce((s, l) => s + l.faturamento, 0))}</span>
-              </span>
-              <span className="text-muted-foreground">
-                Margem: <span className="font-semibold text-foreground tabular-nums">{formatBRL(rows.reduce((s, l) => s + l.margemValor, 0))}</span>
-              </span>
-            </div>
-          )}
-        />
-      </Card>
+          <MatrizFaturamentoMargemChart linhas={linhas} />
+
+          <Card className="gap-0 overflow-hidden p-0">
+            <DataTable
+              tableId="produtos"
+              columns={colunas}
+              data={linhas}
+              buscaPlaceholder="Buscar SKU ou produto"
+              onRowClick={setSelecionado}
+              destacarLinha={(l) => l.alertas.length > 0}
+              vazio="Nenhum SKU no período/filtros selecionados."
+              csv={{
+                nome: "produtos-skus",
+                linhas: (rows) =>
+                  rows.map((l) => ({
+                    SKU: l.sku, Produto: l.produto, Canais: l.canais.join(", "),
+                    "Qtd vendida": l.qtdVendida, "Qtd devolvida": l.qtdDevolvida, Pedidos: l.pedidos,
+                    Faturamento: l.faturamento, "Devolução R$": l.devolucaoValor, "Faturamento líquido": l.faturamentoLiquido,
+                    Custo: l.custoTotal, "Taxas rateadas": l.taxaAlocada, "Frete rateado": l.freteAlocado,
+                    "Margem R$": l.margemValor, "Margem %": l.margemPct, Markup: l.markup,
+                    "Ticket médio": l.ticketMedio, "Taxa devolução": l.taxaDevolucao,
+                    Alertas: l.alertas.join("|"),
+                  })),
+              }}
+              rodape={(rows) => (
+                <div className="flex flex-wrap items-center justify-end gap-x-8 gap-y-2">
+                  <span className="text-muted-foreground">
+                    SKUs: <span className="font-semibold text-foreground">{formatNumero(rows.length)}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Faturamento: <span className="font-semibold text-foreground tabular-nums">{formatBRL(rows.reduce((s, l) => s + l.faturamento, 0))}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Margem: <span className="font-semibold text-foreground tabular-nums">{formatBRL(rows.reduce((s, l) => s + l.margemValor, 0))}</span>
+                  </span>
+                </div>
+              )}
+            />
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="evolucao">
+          <ProductEvolution />
+        </TabsContent>
+      </Tabs>
 
       <SkuDrawer linha={selecionado} pedidos={pedidosFiltrados} aberto={Boolean(selecionado)} onClose={() => setSelecionado(null)} />
     </>

@@ -36,6 +36,13 @@
       "when": 1783774107780,
       "tag": "0004_milky_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785595660191,
+      "tag": "0005_volatile_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

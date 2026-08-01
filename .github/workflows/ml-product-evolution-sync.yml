@@ -1,0 +1,48 @@
+name: Mercado Livre product evolution sync
+
+on:
+  schedule:
+    # 04:30 em America/Fortaleza, depois do fechamento diário do marketplace.
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Reprocessar os sete meses completos?"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ml-product-evolution-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync direct Mercado Livre product evolution
+        env:
+          BASE_URL: ${{ vars.OLIST_BASE_URL || 'https://olist-dash.vercel.app' }}
+          SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
+          FULL: ${{ inputs.full || 'false' }}
+        run: |
+          set -euo pipefail
+          URL="$BASE_URL/api/ml/products/evolution/sync"
+          if [ "$FULL" = "true" ]; then URL="$URL?full=1"; fi
+
+          completed=false
+          for attempt in $(seq 1 8); do
+            if ! response=$(curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 280); then
+              echo "Tentativa $attempt falhou; o cursor persistido será retomado." >&2
+              if [ "$attempt" -lt 8 ]; then sleep $((attempt * 5)); fi
+              continue
+            fi
+            echo "$response" | jq '{ok, mode, processedMonths, coveredMonths, cursorMonth, completed}'
+            completed=$(echo "$response" | jq -r '.completed // false')
+            if [ "$completed" = "true" ]; then break; fi
+          done
+
+          if [ "$completed" != "true" ]; then
+            echo "A sincronização não concluiu dentro de oito execuções retomáveis." >&2
+            exit 1
+          fi

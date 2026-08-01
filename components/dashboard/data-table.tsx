@@ -80,6 +80,7 @@ interface DataTableProps<T> {
   /** Identificador estável usado para persistir ordem/visibilidade/filtros no localStorage. */
   tableId?: string
   buscaPlaceholder?: string
+  mostrarBusca?: boolean
   csv?: { nome: string; linhas: (rows: T[]) => Record<string, string | number>[] }
   rodape?: (rows: T[]) => ReactNode
   onRowClick?: (row: T) => void
@@ -116,6 +117,7 @@ export function DataTable<T>({
   data,
   tableId,
   buscaPlaceholder = "Buscar...",
+  mostrarBusca = true,
   csv,
   rodape,
   onRowClick,
@@ -261,11 +263,13 @@ export function DataTable<T>({
 
   return (
     <div>
-      <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={buscaPlaceholder} className="pl-9" />
-        </div>
+      <div className={cn("flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between", !mostrarBusca && "sm:justify-end")}>
+        {mostrarBusca && (
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={buscaPlaceholder} className="pl-9" />
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">
             {linhasFiltradas.length.toLocaleString("pt-BR")} registros
