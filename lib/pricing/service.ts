@@ -16,8 +16,11 @@ import {
 import { evaluatePricing, findPriceForMargin, type PricingQuote, type ResolvedPricingInput } from "."
 
 const priceCache = new Map<string, { expiresAt: number; value: number | null }>()
+const quoteCache = new Map<string, { expiresAt: number; value: Promise<PricingQuote> }>()
 const PRICE_CACHE_MS = 30 * 60 * 1000
 const PRICE_CACHE_MAX_ENTRIES = 1_000
+const QUOTE_CACHE_MS = 5 * 60 * 1000
+const QUOTE_CACHE_MAX_ENTRIES = 5_000
 let sellerCache: { id: string; expiresAt: number } | null = null
 
 export async function simulateItemPricing(
@@ -42,7 +45,7 @@ export async function simulateItemPricing(
   const settings = settingsMetadata.value
   const override = overrideMetadata?.value ?? null
   const productCost = await resolveProductCost(item, override, overrideMetadata?.updatedAt)
-  const quote = (priceCents: number) => quoteItemCosts({
+  const quote = (priceCents: number) => cachedQuoteItemCosts({
     item,
     sellerId,
     accessToken,
@@ -148,6 +151,20 @@ async function quoteItemCosts(input: {
       }, input.accessToken),
   ])
   return { saleFeeCents, shippingCostCents, feeReductionCents: input.feeReductionCents }
+}
+
+function cachedQuoteItemCosts(input: Parameters<typeof quoteItemCosts>[0]): Promise<PricingQuote> {
+  const key = [input.item.itemId, input.item.syncedAt.toISOString(), input.priceCents,
+    input.shippingOverrideCents, input.feeReductionCents].join(":")
+  const cached = quoteCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const value = quoteItemCosts(input).catch((error) => {
+    quoteCache.delete(key)
+    throw error
+  })
+  if (quoteCache.size >= QUOTE_CACHE_MAX_ENTRIES) quoteCache.delete(quoteCache.keys().next().value ?? "")
+  quoteCache.set(key, { value, expiresAt: Date.now() + QUOTE_CACHE_MS })
+  return value
 }
 
 async function cachedTargetPrice(

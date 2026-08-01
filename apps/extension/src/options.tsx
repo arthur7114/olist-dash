@@ -15,8 +15,11 @@ function Options() {
     let origin: string
     try { origin = `${new URL(normalized.apiBaseUrl).origin}/*` }
     catch { return show("Informe uma URL de API válida.", true) }
-    const granted = await chrome.permissions.request({ origins: [origin] })
-    if (!granted) return show("Autorize o acesso ao domínio da API para continuar.", true)
+    const allowedWithoutPrompt = new URL(normalized.apiBaseUrl).origin === "https://olist-dash.vercel.app"
+    if (!allowedWithoutPrompt) {
+      const granted = await chrome.permissions.request({ origins: [origin] }).catch(() => false)
+      if (!granted) return show("Esta build aceita a API oficial ou localhost autorizado.", true)
+    }
     const saved = await send<ExtensionConfig>({ type: "oem:save-config", config: normalized })
     if (!saved.ok) return show(saved.error, true)
     const tested = await send({ type: "oem:request", path: "/api/extension/bootstrap" })

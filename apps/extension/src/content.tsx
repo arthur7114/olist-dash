@@ -196,7 +196,7 @@ function sendLimited<T = unknown>(message: unknown): Promise<ExtensionReply<T>> 
   return new Promise((resolve) => {
     requestQueue.push(() => {
       activeRequests += 1
-      void send<T>(message).then(resolve).finally(() => {
+      void send<T>(message).then(resolve, (error) => resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })).finally(() => {
         activeRequests -= 1
         drainRequestQueue()
       })

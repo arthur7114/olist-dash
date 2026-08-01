@@ -12,6 +12,8 @@ pnpm --filter @oem/ml-pricing-extension build
 
 Carregue `apps/extension/dist` em `chrome://extensions` com o modo do desenvolvedor ativado. Na página de opções, configure a URL do OEM Dash e a `EXTENSION_API_KEY`.
 
+A build de produção autoriza `https://olist-dash.vercel.app`; para desenvolvimento, `http://localhost` pode ser autorizado sob demanda. Outros domínios exigem uma build com a origem OEM explicitamente declarada no manifesto.
+
 O backend precisa de `DATABASE_URL`, `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `OLIST_SYNC_SECRET` e `EXTENSION_API_KEY`. A chave da extensão deve ser longa, aleatória, diferente do segredo de sincronização e configurada também pelos usuários na página de opções.
 
 ## Pacote de produção

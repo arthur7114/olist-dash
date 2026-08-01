@@ -144,6 +144,13 @@ export default function PrecificacaoPage() {
     const timer = window.setTimeout(() => {
       void request(`/api/extension/catalog?q=${encodeURIComponent(query)}`).then((catalog) => {
         setSearchResults(catalog.items)
+        setSelectedItemId((current) => {
+          if (catalog.items.some((item: CatalogItem) => item.itemId === current)) return current
+          const first = catalog.items[0] as CatalogItem | undefined
+          setCandidatePrice(centsToInput(first?.currentPriceCents ?? null))
+          setEvaluation(null)
+          return first?.itemId ?? ""
+        })
         setItems((current) => {
           const merged = new Map(current.map((item) => [item.itemId, item]))
           catalog.items.forEach((item: CatalogItem) => merged.set(item.itemId, item))

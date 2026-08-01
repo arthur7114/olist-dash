@@ -15,7 +15,6 @@
     "https://olist-dash.vercel.app/*"
   ],
   "optional_host_permissions": [
-    "https://*/*",
     "http://localhost/*"
   ],
   "background": {
