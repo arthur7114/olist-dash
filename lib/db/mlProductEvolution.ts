@@ -16,27 +16,35 @@ export async function replaceMlProductMonth(month: string, rows: MlProductMonthM
   const db = getDb()
   const monthDate = `${month}-01`
   const now = new Date()
+  const removePrevious = db
+    .delete(mlProductMonthlyMetrics)
+    .where(eq(mlProductMonthlyMetrics.month, monthDate))
 
-  await db.transaction(async (tx) => {
-    await tx.delete(mlProductMonthlyMetrics).where(eq(mlProductMonthlyMetrics.month, monthDate))
-    if (!rows.length) return
-    await tx.insert(mlProductMonthlyMetrics).values(
-      rows.map((row) => ({
-        month: monthDate,
-        productKey: row.productKey,
-        title: row.title,
-        itemIds: row.itemIds,
-        createdOrders: row.created.orders,
-        createdUnits: row.created.units,
-        createdRevenue: String(row.created.revenue),
-        paidOrders: row.paid.orders,
-        paidUnits: row.paid.units,
-        paidRevenue: String(row.paid.revenue),
-        visits: row.visits,
-        syncedAt: now,
-      })),
-    )
-  })
+  if (!rows.length) {
+    await db.batch([removePrevious])
+    return
+  }
+
+  const publishCurrent = db.insert(mlProductMonthlyMetrics).values(
+    rows.map((row) => ({
+      month: monthDate,
+      productKey: row.productKey,
+      title: row.title,
+      itemIds: row.itemIds,
+      createdOrders: row.created.orders,
+      createdUnits: row.created.units,
+      createdRevenue: String(row.created.revenue),
+      paidOrders: row.paid.orders,
+      paidUnits: row.paid.units,
+      paidRevenue: String(row.paid.revenue),
+      visits: row.visits,
+      syncedAt: now,
+    })),
+  )
+
+  // Neon HTTP não expõe db.transaction(), mas batch é enviado como uma única
+  // transação pela API do Neon: delete e insert publicam o mês juntos.
+  await db.batch([removePrevious, publishCurrent])
 }
 
 export async function getMlProductMonths(months: string[]): Promise<MlProductMonthMetric[]> {
