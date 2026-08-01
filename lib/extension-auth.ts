@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "crypto"
+import { createHash, timingSafeEqual } from "crypto"
 import { NextResponse } from "next/server"
 
 export function isExtensionAuthorized(request: Request, expected = process.env.EXTENSION_API_KEY): boolean {
@@ -6,9 +6,9 @@ export function isExtensionAuthorized(request: Request, expected = process.env.E
   const authorization = request.headers.get("authorization") ?? ""
   if (!authorization.startsWith("Bearer ")) return false
   const provided = authorization.slice(7)
-  const left = Buffer.from(provided)
-  const right = Buffer.from(expected)
-  return left.length === right.length && timingSafeEqual(left, right)
+  const left = createHash("sha256").update(provided).digest()
+  const right = createHash("sha256").update(expected).digest()
+  return timingSafeEqual(left, right)
 }
 
 export function requireExtensionAuthorization(request: Request): NextResponse | null {

@@ -28,4 +28,23 @@ describe("adaptadores do Mercado Livre", () => {
       priceCents: 14_990,
     })
   })
+
+  it("detecta conteúdo carregado depois e muda a assinatura quando o preço muda", () => {
+    expect(findCommercialTargets()).toHaveLength(0)
+    document.body.innerHTML = `<article data-item-id="MLB987654321"><span>R$ 99,90</span></article>`
+    const first = findCommercialTargets()
+    document.querySelector("span")!.textContent = "R$ 109,90"
+    const second = findCommercialTargets()
+
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(1)
+    expect(first[0].priceCents).toBe(9_990)
+    expect(second[0].priceCents).toBe(10_990)
+    expect(second[0].key).not.toBe(first[0].key)
+  })
+
+  it("reconhece navegação SPA ao trocar a URL suportada", () => {
+    expect(isSupportedCommercialPage(new URL("https://www.mercadolivre.com.br/anuncios/lista"))).toBe(true)
+    expect(isSupportedCommercialPage(new URL("https://www.mercadolivre.com.br/vendas/lista"))).toBe(false)
+  })
 })

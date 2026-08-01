@@ -80,7 +80,9 @@ CREATE TABLE "pricing_settings" (
 );
 --> statement-breakpoint
 CREATE TABLE "pricing_overrides" (
-	"item_id" text PRIMARY KEY NOT NULL,
+	"key" text PRIMARY KEY NOT NULL,
+	"scope" text DEFAULT 'item' NOT NULL,
+	"item_id" text,
 	"seller_sku" text,
 	"product_cost" numeric(16, 2),
 	"shipping_cost" numeric(16, 2),

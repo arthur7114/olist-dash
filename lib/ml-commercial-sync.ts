@@ -14,6 +14,7 @@ import {
 
 export interface CommercialSyncResult {
   ok: boolean
+  error?: string
   itemsSynced: number
   promotionsSynced: number
   errors: Array<{ itemId: string; error: string }>
@@ -73,5 +74,6 @@ export async function syncMlCommercialData(itemIds?: string[]): Promise<Commerci
       promotionsSynced,
     })
   }
-  return { ok: itemsSynced > 0 || !ids.length, itemsSynced, promotionsSynced, errors, completed }
+  const ok = targeted ? errors.length === 0 : itemsSynced > 0 || !ids.length
+  return { ok, error: ok ? undefined : `${errors.length} etapa(s) falharam durante a atualização.`, itemsSynced, promotionsSynced, errors, completed }
 }

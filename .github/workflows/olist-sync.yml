@@ -46,4 +46,10 @@ jobs:
           SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
         run: |
           set -eo pipefail
-          curl -fsS -X POST "$BASE_URL/api/ml/commercial/sync" -H "Authorization: Bearer $SYNC_SECRET" -m 280 | tee /dev/stderr
+          for page in $(seq 1 50); do
+            RESPONSE=$(curl -fsS -X POST "$BASE_URL/api/ml/commercial/sync" -H "Authorization: Bearer $SYNC_SECRET" -m 280)
+            echo "$RESPONSE" | tee /dev/stderr
+            if echo "$RESPONSE" | jq -e '.completed == true' >/dev/null; then exit 0; fi
+          done
+          echo "Sync comercial não concluiu após 50 páginas." >&2
+          exit 1

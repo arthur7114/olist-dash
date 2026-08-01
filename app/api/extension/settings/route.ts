@@ -1,7 +1,7 @@
 import { pricingOverrideSchema, pricingSettingsSchema } from "@oem/contracts"
 import { z } from "zod"
 import { requireExtensionAuthorization, privateJson } from "@/lib/extension-auth"
-import { getPricingOverride, getPricingSettings, savePricingOverride, savePricingSettings } from "@/lib/db/pricing"
+import { getMlItem, getPricingOverride, getPricingSettings, savePricingOverride, savePricingSettings } from "@/lib/db/pricing"
 
 const updateSchema = z.union([
   z.object({ settings: pricingSettingsSchema }),
@@ -12,9 +12,10 @@ export async function GET(request: Request) {
   const denied = requireExtensionAuthorization(request)
   if (denied) return denied
   const itemId = new URL(request.url).searchParams.get("itemId")
+  const item = itemId ? await getMlItem(itemId) : null
   const [settings, override] = await Promise.all([
     getPricingSettings(),
-    itemId ? getPricingOverride(itemId) : Promise.resolve(null),
+    itemId ? getPricingOverride(itemId, item?.sellerSku) : Promise.resolve(null),
   ])
   return privateJson({ ok: true, settings, override })
 }

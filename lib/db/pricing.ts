@@ -52,10 +52,12 @@ export async function upsertMlItems(rows: CommercialItemSnapshot[]): Promise<voi
 
 export async function replaceMlItemPromotions(itemId: string, rows: NormalizedPromotion[]): Promise<void> {
   const db = getDb()
-  await db.transaction(async (tx) => {
-    await tx.delete(mlPromotions).where(eq(mlPromotions.itemId, itemId))
-    if (!rows.length) return
-    await tx.insert(mlPromotions).values(rows.map((row) => ({
+  const remove = db.delete(mlPromotions).where(eq(mlPromotions.itemId, itemId))
+  if (!rows.length) {
+    await remove
+    return
+  }
+  const insert = db.insert(mlPromotions).values(rows.map((row) => ({
       key: row.key,
       itemId: row.itemId,
       promotionId: row.promotionId,
@@ -74,7 +76,7 @@ export async function replaceMlItemPromotions(itemId: string, rows: NormalizedPr
       raw: row.raw,
       syncedAt: new Date(row.syncedAt),
     })))
-  })
+  await db.batch([remove, insert])
 }
 
 export async function getMlItem(itemId: string): Promise<MlItemRow | null> {
@@ -105,13 +107,20 @@ export async function getMlPromotion(key: string): Promise<MlPromotionRow | null
 }
 
 export async function getPricingSettings(): Promise<PricingSettings> {
+  return (await getPricingSettingsWithMetadata()).value
+}
+
+export async function getPricingSettingsWithMetadata(): Promise<{ value: PricingSettings; updatedAt: Date | null }> {
   const [row] = await getDb().select().from(pricingSettings).where(eq(pricingSettings.id, 1)).limit(1)
   return {
-    taxRateBps: row?.taxRateBps ?? null,
-    adsRateBps: row?.adsRateBps ?? 0,
-    fixedCostCents: dbMoneyToCents(row?.fixedCost ?? "0") ?? 0,
-    minimumMarginBps: row?.minimumMarginBps ?? null,
-    targetMarginBps: row?.targetMarginBps ?? null,
+    value: {
+      taxRateBps: row?.taxRateBps ?? null,
+      adsRateBps: row?.adsRateBps ?? 0,
+      fixedCostCents: dbMoneyToCents(row?.fixedCost ?? "0") ?? 0,
+      minimumMarginBps: row?.minimumMarginBps ?? null,
+      targetMarginBps: row?.targetMarginBps ?? null,
+    },
+    updatedAt: row?.updatedAt ?? null,
   }
 }
 
@@ -138,11 +147,19 @@ export async function savePricingSettings(settings: PricingSettings): Promise<Pr
   return settings
 }
 
-export async function getPricingOverride(itemId: string): Promise<PricingOverride | null> {
-  const [row] = await getDb().select().from(pricingOverrides).where(eq(pricingOverrides.itemId, itemId)).limit(1)
+export async function getPricingOverride(itemId: string, sellerSku?: string | null): Promise<PricingOverride | null> {
+  return (await getPricingOverrideWithMetadata(itemId, sellerSku))?.value ?? null
+}
+
+export async function getPricingOverrideWithMetadata(itemId: string, sellerSku?: string | null): Promise<{ value: PricingOverride; updatedAt: Date } | null> {
+  const keys = [`item:${itemId}`]
+  if (sellerSku) keys.push(`sku:${sellerSku}`)
+  const rows = await getDb().select().from(pricingOverrides).where(inArray(pricingOverrides.key, keys)).limit(2)
+  const row = rows.find((candidate) => candidate.key === `item:${itemId}`) ?? rows.find((candidate) => candidate.key === `sku:${sellerSku}`)
   if (!row) return null
-  return {
-    itemId: row.itemId,
+  return { value: {
+    scope: row.scope === "sku" ? "sku" : "item",
+    itemId,
     sellerSku: row.sellerSku,
     productCostCents: dbMoneyToCents(row.productCost),
     shippingCostCents: dbMoneyToCents(row.shippingCost),
@@ -151,11 +168,15 @@ export async function getPricingOverride(itemId: string): Promise<PricingOverrid
     fixedCostCents: row.fixedCost == null ? undefined : dbMoneyToCents(row.fixedCost) ?? undefined,
     minimumMarginBps: row.minimumMarginBps ?? undefined,
     targetMarginBps: row.targetMarginBps ?? undefined,
-  }
+  }, updatedAt: row.updatedAt }
 }
 
 export async function savePricingOverride(value: PricingOverride): Promise<PricingOverride> {
+  if (value.scope === "sku" && !value.sellerSku) throw new Error("SKU é obrigatório para override por SKU.")
+  const key = value.scope === "sku" ? `sku:${value.sellerSku}` : `item:${value.itemId}`
   const row = {
+    key,
+    scope: value.scope,
     itemId: value.itemId,
     sellerSku: value.sellerSku ?? null,
     productCost: centsToDb(value.productCostCents ?? null),
@@ -168,19 +189,25 @@ export async function savePricingOverride(value: PricingOverride): Promise<Prici
     updatedAt: new Date(),
   }
   await getDb().insert(pricingOverrides).values(row).onConflictDoUpdate({
-    target: pricingOverrides.itemId,
+    target: pricingOverrides.key,
     set: row,
   })
   return value
 }
 
-export async function resolveProductCostCents(item: MlItemRow, override: PricingOverride | null): Promise<number | null> {
-  if (override?.productCostCents != null) return override.productCostCents
+export async function resolveProductCost(item: MlItemRow, override: PricingOverride | null, overrideUpdatedAt?: Date | null): Promise<{ cents: number | null; updatedAt: Date | null; source: "olist" | "override" }> {
+  if (override?.productCostCents != null) return { cents: override.productCostCents, updatedAt: overrideUpdatedAt ?? null, source: "override" }
   const refs = [`id:${item.itemId}`]
   if (item.sellerSku) refs.unshift(`sku:${item.sellerSku}`)
   const rows = await getDb().select().from(productCosts).where(inArray(productCosts.ref, refs)).limit(refs.length)
   const preferred = refs.map((ref) => rows.find((row) => row.ref === ref)).find(Boolean)
-  return preferred ? dbMoneyToCents(preferred.custo) : null
+  return preferred
+    ? { cents: dbMoneyToCents(preferred.custo), updatedAt: preferred.updatedAt, source: "olist" }
+    : { cents: null, updatedAt: null, source: "olist" }
+}
+
+export async function resolveProductCostCents(item: MlItemRow, override: PricingOverride | null): Promise<number | null> {
+  return (await resolveProductCost(item, override)).cents
 }
 
 export async function getCommercialSyncState() {
@@ -192,9 +219,12 @@ export async function getCommercialSyncState() {
 export async function getPricingCoverage(): Promise<{ totalItems: number; itemsWithCost: number }> {
   const result = await getDb().execute(sql`
     select count(*)::int as "totalItems",
-      (count(*) filter (where po.product_cost is not null or pc.custo is not null))::int as "itemsWithCost"
+      (count(*) filter (where exists (
+        select 1 from pricing_overrides po
+        where (po.key = ('item:' || mi.item_id) or po.key = ('sku:' || mi.seller_sku))
+          and po.product_cost is not null and po.product_cost > 0
+      ) or pc.custo > 0))::int as "itemsWithCost"
     from ml_items mi
-    left join pricing_overrides po on po.item_id = mi.item_id
     left join product_costs pc on pc.ref = ('sku:' || mi.seller_sku)
   `)
   const row = result.rows[0] as { totalItems?: number | string; itemsWithCost?: number | string } | undefined

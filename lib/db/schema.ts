@@ -191,7 +191,9 @@ export const pricingSettings = pgTable("pricing_settings", {
 })
 
 export const pricingOverrides = pgTable("pricing_overrides", {
-  itemId: text("item_id").primaryKey(),
+  key: text("key").primaryKey(),
+  scope: text("scope").notNull().default("item"),
+  itemId: text("item_id"),
   sellerSku: text("seller_sku"),
   productCost: numeric("product_cost", { precision: 16, scale: 2 }),
   shippingCost: numeric("shipping_cost", { precision: 16, scale: 2 }),

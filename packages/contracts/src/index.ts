@@ -19,6 +19,7 @@ export const pricingSettingsSchema = pricingSettingsBaseSchema.superRefine(valid
 export type PricingSettings = z.infer<typeof pricingSettingsSchema>
 
 export const pricingOverrideSchema = z.object({
+  scope: z.enum(["item", "sku"]).default("item"),
   itemId: z.string().min(1),
   sellerSku: z.string().nullable().optional(),
   productCostCents: z.number().int().min(0).nullable().optional(),
@@ -87,7 +88,7 @@ export type PricingEvaluation = z.infer<typeof pricingEvaluationSchema>
 export const simulatePricingRequestSchema = z.object({
   itemId: z.string().min(1).max(64),
   candidatePriceCents: z.number().int().positive(),
-  feeReductionCents: z.number().int().min(0).optional(),
+  includeTargetPrices: z.boolean().optional().default(true),
 })
 export type SimulatePricingRequest = z.infer<typeof simulatePricingRequestSchema>
 

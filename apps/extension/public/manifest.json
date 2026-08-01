@@ -14,6 +14,10 @@
     "https://*.mercadolivre.com.br/*",
     "https://olist-dash.vercel.app/*"
   ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*"
+  ],
   "background": {
     "service_worker": "assets/service-worker.js",
     "type": "module"

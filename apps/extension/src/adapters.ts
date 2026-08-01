@@ -28,7 +28,7 @@ export function findCommercialTargets(root: ParentNode = document): CommercialTa
     const promotionType = readAttribute(candidate, anchor, ["data-promotion-type", "data-campaign-type"])
     const offerId = readAttribute(candidate, anchor, ["data-offer-id"])
     const priceCents = extractPrice(candidate, anchor)
-    const key = [itemId, promotionType, promotionId, offerId].filter(Boolean).join(":")
+    const key = [itemId, promotionType, promotionId, offerId, priceCents].filter((value) => value != null && value !== "").join(":")
     if (!targets.has(key)) targets.set(key, { key, itemId, promotionId, promotionType, offerId, priceCents, anchor })
   }
   return Array.from(targets.values()).slice(0, 50)

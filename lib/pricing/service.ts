@@ -9,9 +9,9 @@ import {
   dbMoneyToCents,
   getMlItem,
   getMlPromotion,
-  getPricingOverride,
-  getPricingSettings,
-  resolveProductCostCents,
+  getPricingOverrideWithMetadata,
+  getPricingSettingsWithMetadata,
+  resolveProductCost,
 } from "@/lib/db/pricing"
 import { evaluatePricing, findPriceForMargin, type PricingQuote, type ResolvedPricingInput } from "."
 
@@ -25,20 +25,23 @@ export async function simulateItemPricing(
   candidatePriceCents: number,
   feeReductionCents = 0,
   includeTargetPrices = true,
+  additionalEssentialUpdatedAt?: string,
 ): Promise<PricingEvaluation> {
-  const [item, settings, override, accessToken] = await Promise.all([
+  const [item, accessToken] = await Promise.all([
     getMlItem(itemId),
-    getPricingSettings(),
-    getPricingOverride(itemId),
     getMlAccessToken(),
   ])
   if (!item) throw new PricingNotFoundError(`Anúncio ${itemId} não encontrado no catálogo.`)
   if (item.currencyId !== "BRL") throw new PricingValidationError("A v1 aceita apenas anúncios em BRL.")
 
-  const [sellerId, productCostCents] = await Promise.all([
+  const [sellerId, settingsMetadata, overrideMetadata] = await Promise.all([
     getSellerId(accessToken),
-    resolveProductCostCents(item, override),
+    getPricingSettingsWithMetadata(),
+    getPricingOverrideWithMetadata(itemId, item.sellerSku),
   ])
+  const settings = settingsMetadata.value
+  const override = overrideMetadata?.value ?? null
+  const productCost = await resolveProductCost(item, override, overrideMetadata?.updatedAt)
   const quote = (priceCents: number) => quoteItemCosts({
     item,
     sellerId,
@@ -49,6 +52,16 @@ export async function simulateItemPricing(
   })
   const variable = await quote(candidatePriceCents)
   const updatedAt = item.syncedAt.toISOString()
+  const overrideFields = [override?.productCostCents, override?.shippingCostCents, override?.taxRateBps,
+    override?.adsRateBps, override?.fixedCostCents, override?.minimumMarginBps, override?.targetMarginBps]
+  const usesOverride = overrideFields.some((value) => value != null)
+  const usesSettings = [override?.taxRateBps, override?.adsRateBps, override?.fixedCostCents,
+    override?.minimumMarginBps, override?.targetMarginBps].some((value) => value == null)
+  const requiredUpdatedAt = oldestIsoDate([
+    updatedAt,
+    additionalEssentialUpdatedAt,
+    productCost.source === "olist" ? productCost.updatedAt?.toISOString() : null,
+  ])
   const resolved: ResolvedPricingInput = {
     itemId: item.itemId,
     sellerSku: item.sellerSku,
@@ -59,17 +72,18 @@ export async function simulateItemPricing(
     saleFeeCents: variable.saleFeeCents,
     feeReductionCents,
     shippingCostCents: variable.shippingCostCents,
-    productCostCents,
+    productCostCents: productCost.cents,
     taxRateBps: override?.taxRateBps ?? settings.taxRateBps,
     adsRateBps: override?.adsRateBps ?? settings.adsRateBps,
     fixedCostCents: override?.fixedCostCents ?? settings.fixedCostCents,
     minimumMarginBps: override?.minimumMarginBps ?? settings.minimumMarginBps,
     targetMarginBps: override?.targetMarginBps ?? settings.targetMarginBps,
-    requiredUpdatedAt: updatedAt,
+    requiredUpdatedAt,
     sources: [
       { field: "preço/tarifa/frete", source: "mercado_livre", updatedAt },
-      { field: "custo do produto", source: override?.productCostCents != null ? "override" : "olist", updatedAt: null },
-      { field: "parâmetros financeiros", source: override ? "override" : "settings", updatedAt: null },
+      { field: "custo do produto", source: productCost.source, updatedAt: productCost.updatedAt?.toISOString() ?? null },
+      ...(usesSettings ? [{ field: "parâmetros financeiros herdados", source: "settings" as const, updatedAt: settingsMetadata.updatedAt?.toISOString() ?? null }] : []),
+      ...(usesOverride ? [{ field: "overrides", source: "override" as const, updatedAt: overrideMetadata?.updatedAt.toISOString() ?? null }] : []),
     ],
   }
   const evaluation = evaluatePricing(resolved)
@@ -85,18 +99,24 @@ export async function simulateItemPricing(
 export async function evaluateStoredPromotion(key: string, includeTargetPrices = false): Promise<PricingEvaluation> {
   const promotion = await getMlPromotion(key)
   if (!promotion) throw new PricingNotFoundError(`Promoção ${key} não encontrada.`)
-  const candidate = dbMoneyToCents(
-    promotion.candidatePrice ?? promotion.suggestedPrice ?? promotion.originalPrice,
-  )
-  if (candidate == null || candidate <= 0) {
-    throw new PricingValidationError("A promoção não informou um preço candidato válido.")
-  }
-  return simulateItemPricing(
+  const candidate = dbMoneyToCents(promotion.candidatePrice ?? promotion.suggestedPrice)
+  const fallbackPrice = candidate ?? dbMoneyToCents(promotion.originalPrice)
+  if (fallbackPrice == null || fallbackPrice <= 0) throw new PricingValidationError("A promoção não informou um preço válido.")
+  const evaluation = await simulateItemPricing(
     promotion.itemId,
-    candidate,
+    fallbackPrice,
     dbMoneyToCents(promotion.feeReduction) ?? 0,
-    includeTargetPrices,
+    includeTargetPrices && candidate != null,
+    promotion.syncedAt.toISOString(),
   )
+  if (candidate != null) return evaluation
+  return {
+    ...evaluation,
+    recommendation: "incomplete",
+    minimumPriceCents: null,
+    targetPriceCents: null,
+    blockedReasons: [...evaluation.blockedReasons, "Promoção não informou preço candidato ou sugerido."],
+  }
 }
 
 async function quoteItemCosts(input: {
@@ -151,6 +171,11 @@ async function getSellerId(accessToken: string): Promise<string> {
   const id = String(me.id)
   sellerCache = { id, expiresAt: Date.now() + 60 * 60 * 1000 }
   return id
+}
+
+function oldestIsoDate(values: Array<string | undefined | null>): string | null {
+  const timestamps = values.flatMap((value) => value ? [Date.parse(value)] : []).filter(Number.isFinite)
+  return timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null
 }
 
 export class PricingNotFoundError extends Error {}

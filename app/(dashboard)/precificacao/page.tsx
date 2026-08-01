@@ -44,6 +44,7 @@ const EMPTY_SETTINGS: PricingSettings = {
 }
 
 const EMPTY_OVERRIDE: PricingOverride = {
+  scope: "item",
   itemId: "",
   sellerSku: null,
   productCostCents: null,
@@ -59,9 +60,11 @@ export default function PrecificacaoPage() {
   const [apiKey, setApiKey] = useState("")
   const [draftKey, setDraftKey] = useState("")
   const [items, setItems] = useState<CatalogItem[]>([])
+  const [searchResults, setSearchResults] = useState<CatalogItem[]>([])
   const [promotions, setPromotions] = useState<CatalogPromotion[]>([])
   const [settings, setSettings] = useState<PricingSettings>(EMPTY_SETTINGS)
   const [selectedItemId, setSelectedItemId] = useState("")
+  const [itemSearch, setItemSearch] = useState("")
   const [candidatePrice, setCandidatePrice] = useState("")
   const [evaluation, setEvaluation] = useState<PricingEvaluation | null>(null)
   const [promotionResults, setPromotionResults] = useState<Record<string, PricingEvaluation>>({})
@@ -132,7 +135,30 @@ export default function PrecificacaoPage() {
 
   useEffect(() => { void load() }, [load])
 
+  useEffect(() => {
+    const query = itemSearch.trim()
+    if (!apiKey || !query) {
+      setSearchResults([])
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void request(`/api/extension/catalog?q=${encodeURIComponent(query)}`).then((catalog) => {
+        setSearchResults(catalog.items)
+        setItems((current) => {
+          const merged = new Map(current.map((item) => [item.itemId, item]))
+          catalog.items.forEach((item: CatalogItem) => merged.set(item.itemId, item))
+          return Array.from(merged.values())
+        })
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [apiKey, itemSearch, request])
+
   const selectedItem = useMemo(() => items.find((item) => item.itemId === selectedItemId), [items, selectedItemId])
+  const filteredItems = useMemo(() => (itemSearch.trim() ? searchResults : items).filter((item) => {
+    const needle = itemSearch.trim().toLowerCase()
+    return !needle || `${item.itemId} ${item.sellerSku ?? ""} ${item.title}`.toLowerCase().includes(needle)
+  }), [itemSearch, items, searchResults])
   const promotionStatuses = useMemo(() => Array.from(new Set(promotions.map((promotion) => promotion.status))).sort(), [promotions])
   const filteredPromotions = useMemo(() => promotions.filter((promotion) => {
     const item = items.find((row) => row.itemId === promotion.itemId)
@@ -198,9 +224,9 @@ export default function PrecificacaoPage() {
       })
       const next: Record<string, PricingEvaluation> = {}
       const baselines: Record<string, PricingEvaluation> = {}
-      data.results.forEach((result: { entry: { itemId: string; promotionId: string; type: string }; ok: boolean; evaluation?: PricingEvaluation; currentEvaluation?: PricingEvaluation | null }) => {
+      data.results.forEach((result: { entry: { itemId: string; promotionId: string; type: string; offerId?: string | null }; ok: boolean; evaluation?: PricingEvaluation; currentEvaluation?: PricingEvaluation | null }) => {
         if (!result.ok || !result.evaluation) return
-        const promotion = batch.find((row) => row.itemId === result.entry.itemId && row.promotionId === result.entry.promotionId && row.type === result.entry.type)
+        const promotion = batch.find((row) => row.itemId === result.entry.itemId && row.promotionId === result.entry.promotionId && row.type === result.entry.type && row.offerId === (result.entry.offerId ?? null))
         if (promotion) {
           next[promotion.key] = result.evaluation
           if (result.currentEvaluation) baselines[promotion.key] = result.currentEvaluation
@@ -274,6 +300,7 @@ export default function PrecificacaoPage() {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,.8fr)]">
               <Card><CardHeader><CardTitle>Simular preço</CardTitle><CardDescription>As tarifas e o frete são cotados para o valor informado.</CardDescription></CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="space-y-2"><Label>Buscar por SKU, item ou título</Label><Input value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Ex.: MLB123, SKU-001 ou nome do produto" /></div>
                   <div className="space-y-2"><Label>Anúncio</Label>
                     <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={selectedItemId} onChange={(event) => {
                       setSelectedItemId(event.target.value)
@@ -281,7 +308,7 @@ export default function PrecificacaoPage() {
                       setCandidatePrice(centsToInput(item?.currentPriceCents ?? null))
                       setEvaluation(null)
                     }}>
-                      {items.map((item) => <option key={item.itemId} value={item.itemId}>{item.sellerSku ?? item.itemId} · {item.title}</option>)}
+                      {filteredItems.map((item) => <option key={item.itemId} value={item.itemId}>{item.sellerSku ?? item.itemId} · {item.title}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2"><Label>Preço candidato (R$)</Label><Input inputMode="decimal" value={candidatePrice} onChange={(event) => setCandidatePrice(event.target.value)} /></div>
@@ -364,6 +391,7 @@ function OverrideCard({ items, value, onSelect, onChange, onSave, loading }: { i
   ]
   return <Card><CardHeader><CardTitle>Overrides por anúncio</CardTitle><CardDescription>Campos vazios herdam os padrões ou os dados sincronizados.</CardDescription></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">
     <div className="space-y-2 sm:col-span-2"><Label>Anúncio</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={value.itemId} onChange={(event) => onSelect(event.target.value)}>{items.map((item) => <option key={item.itemId} value={item.itemId}>{item.sellerSku ?? item.itemId} · {item.title}</option>)}</select></div>
+    <div className="space-y-2 sm:col-span-2"><Label>Aplicar override</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={value.scope} onChange={(event) => onChange({ ...value, scope: event.target.value as "item" | "sku" })}><option value="item">Somente neste anúncio</option><option value="sku" disabled={!value.sellerSku}>Em todos os anúncios do SKU {value.sellerSku ?? "(sem SKU)"}</option></select></div>
     {fields.map(([key, label, kind]) => <div key={key} className="space-y-2"><Label>{label}</Label><Input inputMode="decimal" value={kind === "rate" ? bpsToInput(value[key] as number | null | undefined) : centsToInput(value[key] as number | null | undefined)} onChange={(event) => onChange({ ...value, [key]: kind === "rate" ? inputToBps(event.target.value) : inputToCents(event.target.value) })} /></div>)}
     <div className="sm:col-span-2"><Button onClick={onSave} disabled={loading || !value.itemId}><Save /> Salvar override</Button></div>
   </CardContent></Card>

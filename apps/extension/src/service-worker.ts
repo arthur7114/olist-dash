@@ -1,4 +1,5 @@
 import { extensionConfigSchema, type ExtensionConfig } from "@oem/contracts"
+import { isAllowedApiRequest } from "./request-policy"
 import type { ExtensionMessage, ExtensionReply } from "./types"
 
 const DEFAULT_CONFIG: ExtensionConfig = { apiBaseUrl: "https://olist-dash.vercel.app", apiKey: "" }
@@ -19,8 +20,10 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionReply>
     if (message.type === "oem:request") {
       const config = await getConfig()
       if (!config.apiKey) throw new Error("Configure a chave da extensão.")
+      const method = message.init?.method?.toUpperCase() ?? "GET"
+      if (!isAllowedApiRequest(message.path, method)) throw new Error("Requisição não permitida pela extensão.")
       const response = await fetch(new URL(message.path, config.apiBaseUrl), {
-        method: message.init?.method ?? "GET",
+        method,
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",

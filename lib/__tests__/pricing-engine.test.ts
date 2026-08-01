@@ -77,6 +77,12 @@ describe("evaluatePricing", () => {
     expect(result.blockedReasons).toEqual(["Custo do produto não disponível.", "Frete não disponível."])
   })
 
+  it("não trata custo zero do cache Olist como custo conhecido", () => {
+    const result = evaluatePricing(input({ productCostCents: 0 }), new Date("2026-08-01T13:00:00.000Z"))
+    expect(result.recommendation).toBe("incomplete")
+    expect(result.blockedReasons).toContain("Custo do produto não disponível.")
+  })
+
   it("bloqueia dados essenciais com mais de 24 horas", () => {
     const result = evaluatePricing(input(), new Date("2026-08-03T13:00:00.000Z"))
 

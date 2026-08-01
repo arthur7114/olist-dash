@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { evaluatePromotionsRequestSchema, pricingOverrideSchema, pricingSettingsSchema, refreshItemsRequestSchema } from "@oem/contracts"
+import { evaluatePromotionsRequestSchema, pricingOverrideSchema, pricingSettingsSchema, refreshItemsRequestSchema, simulatePricingRequestSchema } from "@oem/contracts"
 
 describe("contratos da extensão", () => {
   it("limita avaliações e refreshes a 50 itens", () => {
@@ -22,5 +22,10 @@ describe("contratos da extensão", () => {
   it("rejeita meta inferior à margem mínima", () => {
     expect(pricingSettingsSchema.safeParse({ taxRateBps: 900, adsRateBps: 0, fixedCostCents: 0, minimumMarginBps: 1_500, targetMarginBps: 1_000 }).success).toBe(false)
     expect(pricingOverrideSchema.safeParse({ itemId: "MLB123", minimumMarginBps: 1_500, targetMarginBps: 1_000 }).success).toBe(false)
+  })
+
+  it("não aceita redução de tarifa informada pelo cliente na simulação", () => {
+    const parsed = simulatePricingRequestSchema.parse({ itemId: "MLB123", candidatePriceCents: 10_000, feeReductionCents: 5_000 })
+    expect("feeReductionCents" in parsed).toBe(false)
   })
 })

@@ -29,7 +29,7 @@ export function evaluatePricing(
   now = new Date(),
 ): PricingEvaluation {
   const blockedReasons: string[] = []
-  if (input.productCostCents == null) blockedReasons.push("Custo do produto não disponível.")
+  if (input.productCostCents == null || input.productCostCents <= 0) blockedReasons.push("Custo do produto não disponível.")
   if (input.shippingCostCents == null) blockedReasons.push("Frete não disponível.")
   if (input.saleFeeCents == null) blockedReasons.push("Tarifa de venda não disponível.")
   if (input.taxRateBps == null) blockedReasons.push("Imposto padrão não configurado.")

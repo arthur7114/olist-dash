@@ -5,7 +5,7 @@ export async function GET(request: Request) {
   const denied = requireExtensionAuthorization(request)
   if (denied) return denied
   const search = new URL(request.url).searchParams.get("q") ?? ""
-  const [items, promotions] = await Promise.all([listMlItems(search), listMlPromotions()])
+  const [items, promotions] = await Promise.all([listMlItems(search, 2_000), listMlPromotions()])
   return privateJson({
     ok: true,
     items: items.map((item) => ({

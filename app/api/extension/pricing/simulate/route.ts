@@ -14,7 +14,8 @@ export async function POST(request: Request) {
     const evaluation = await simulateItemPricing(
       parsed.data.itemId,
       parsed.data.candidatePriceCents,
-      parsed.data.feeReductionCents ?? 0,
+      0,
+      parsed.data.includeTargetPrices,
     )
     return privateJson({ ok: true, evaluation })
   } catch (error) {

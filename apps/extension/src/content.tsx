@@ -5,7 +5,7 @@ import { findCommercialTargets, isSupportedCommercialPage, type CommercialTarget
 import type { ExtensionReply } from "./types"
 
 const HOST_ATTRIBUTE = "data-oem-pricing-host"
-const mounted = new Map<string, { host: HTMLElement; root: Root }>()
+const mounted = new Map<string, { host: HTMLElement; root: Root; anchor: HTMLElement }>()
 let scheduled = 0
 let lastUrl = location.href
 
@@ -34,6 +34,12 @@ function scan() {
   }
   for (const target of findCommercialTargets()) {
     if (mounted.has(target.key)) continue
+    for (const [key, mount] of mounted) {
+      if (mount.anchor !== target.anchor) continue
+      mount.root.unmount()
+      mount.host.parentElement?.remove()
+      mounted.delete(key)
+    }
     mountTarget(target)
   }
 }
@@ -51,7 +57,7 @@ function mountTarget(target: CommercialTarget) {
   shadow.append(style, root)
   const reactRoot = createRoot(root)
   reactRoot.render(<InjectedPricing target={target} />)
-  mounted.set(target.key, { host, root: reactRoot })
+  mounted.set(target.key, { host, root: reactRoot, anchor: target.anchor })
 }
 
 function clearMounts() {
@@ -68,20 +74,18 @@ function InjectedPricing({ target }: { target: CommercialTarget }) {
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (includeTargetPrices = false) => {
     setLoading(true)
     setError("")
     const reply = target.promotionId && target.promotionType
-      ? await send<{ results: Array<{ ok: boolean; evaluation?: PricingEvaluation; error?: string }> }>({
-        type: "oem:request",
-        path: "/api/extension/promotions/evaluate",
-        init: { method: "POST", body: { entries: [{ itemId: target.itemId, promotionId: target.promotionId, type: target.promotionType, offerId: target.offerId }], includeTargetPrices: true } },
-      })
+      ? includeTargetPrices
+        ? await requestPromotionEvaluation(target, true)
+        : await queuePromotionEvaluation(target)
       : target.priceCents
-        ? await send<{ evaluation: PricingEvaluation }>({
+        ? await sendLimited<{ evaluation: PricingEvaluation }>({
           type: "oem:request",
           path: "/api/extension/pricing/simulate",
-          init: { method: "POST", body: { itemId: target.itemId, candidatePriceCents: target.priceCents } },
+          init: { method: "POST", body: { itemId: target.itemId, candidatePriceCents: target.priceCents, includeTargetPrices } },
         })
         : { ok: false as const, error: "Preço ou promoção não identificado nesta tela." }
     if (!reply.ok) setError(reply.error)
@@ -93,18 +97,22 @@ function InjectedPricing({ target }: { target: CommercialTarget }) {
     setLoading(false)
   }, [target])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(false) }, [load])
 
   async function refresh() {
     const reply = await send({ type: "oem:request", path: "/api/extension/refresh", init: { method: "POST", body: { itemIds: [target.itemId] } } })
     if (!reply.ok) return setError(reply.error)
-    await load()
+    await load(true)
   }
 
   const status = loading ? "Carregando" : error ? "Dados incompletos" : recommendationLabel(evaluation)
   const tone = loading ? "neutral" : error || evaluation?.recommendation === "incomplete" ? "incomplete" : evaluation?.recommendation ?? "neutral"
   return <span className="oem-shell">
-    <button className={`oem-badge ${tone}`} onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>OEM · {status}{evaluation?.marginBps != null ? ` · ${(evaluation.marginBps / 100).toFixed(1)}%` : ""}</button>
+    <button className={`oem-badge ${tone}`} onClick={() => {
+      const next = !expanded
+      setExpanded(next)
+      if (next && evaluation && evaluation.minimumPriceCents == null && !evaluation.blockedReasons.length) void load(true)
+    }} aria-expanded={expanded}>OEM · {status}{evaluation?.marginBps != null ? ` · ${(evaluation.marginBps / 100).toFixed(1)}%` : ""}</button>
     {expanded && <span className="oem-popover">
       <strong>{target.itemId}</strong>
       {error ? <span className="oem-error">{error}</span> : evaluation && <>
@@ -134,6 +142,71 @@ function recommendationLabel(value: PricingEvaluation | null) {
 }
 function money(cents: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100) }
 function send<T = unknown>(message: unknown): Promise<ExtensionReply<T>> { return chrome.runtime.sendMessage(message) }
+
+type PromotionApiData = { results: Array<{ entry: { itemId: string; promotionId: string; type: string; offerId?: string | null }; ok: boolean; evaluation?: PricingEvaluation; error?: string }> }
+const promotionQueue: Array<{ target: CommercialTarget; resolve: (reply: ExtensionReply<PromotionApiData>) => void }> = []
+let promotionTimer = 0
+
+function queuePromotionEvaluation(target: CommercialTarget): Promise<ExtensionReply<PromotionApiData>> {
+  return new Promise((resolve) => {
+    promotionQueue.push({ target, resolve })
+    window.clearTimeout(promotionTimer)
+    promotionTimer = window.setTimeout(flushPromotionQueue, 30)
+  })
+}
+
+async function flushPromotionQueue() {
+  while (promotionQueue.length) {
+    const batch = promotionQueue.splice(0, 50)
+    const reply = await sendLimited<PromotionApiData>({
+      type: "oem:request",
+      path: "/api/extension/promotions/evaluate",
+      init: { method: "POST", body: { entries: batch.map(({ target }) => promotionEntry(target)), includeTargetPrices: false } },
+    })
+    for (const pending of batch) {
+      if (!reply.ok) {
+        pending.resolve(reply)
+        continue
+      }
+      const result = reply.data.results.find(({ entry }) => samePromotion(entry, pending.target))
+      pending.resolve({ ok: true, data: { results: result ? [result] : [] } })
+    }
+  }
+}
+
+function requestPromotionEvaluation(target: CommercialTarget, includeTargetPrices: boolean) {
+  return sendLimited<PromotionApiData>({
+    type: "oem:request",
+    path: "/api/extension/promotions/evaluate",
+    init: { method: "POST", body: { entries: [promotionEntry(target)], includeTargetPrices } },
+  })
+}
+
+function promotionEntry(target: CommercialTarget) {
+  return { itemId: target.itemId, promotionId: target.promotionId!, type: target.promotionType!, offerId: target.offerId }
+}
+
+function samePromotion(entry: PromotionApiData["results"][number]["entry"], target: CommercialTarget) {
+  return entry.itemId === target.itemId && entry.promotionId === target.promotionId && entry.type === target.promotionType && (entry.offerId ?? null) === target.offerId
+}
+
+const requestQueue: Array<() => void> = []
+let activeRequests = 0
+function sendLimited<T = unknown>(message: unknown): Promise<ExtensionReply<T>> {
+  return new Promise((resolve) => {
+    requestQueue.push(() => {
+      activeRequests += 1
+      void send<T>(message).then(resolve).finally(() => {
+        activeRequests -= 1
+        drainRequestQueue()
+      })
+    })
+    drainRequestQueue()
+  })
+}
+function drainRequestQueue() {
+  while (activeRequests < 4 && requestQueue.length) requestQueue.shift()?.()
+}
 
 const SHADOW_CSS = `
   :host { position: relative; display: inline-flex; margin: 6px; font-family: Inter,Arial,sans-serif; z-index: 20; }

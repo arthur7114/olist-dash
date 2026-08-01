@@ -75,13 +75,19 @@ export async function fetchCommercialItemSnapshot(
       accessToken,
       { context: "channel_marketplace" },
       fetchFn,
-    ).catch(() => ({ amount: undefined })),
+    ).catch((error) => {
+      if (error instanceof MlCommercialHttpError && error.status === 404) return { amount: undefined }
+      throw error
+    }),
     fetchMlCommercialJson<{ prices?: Array<{ amount?: number }> } | Array<{ amount?: number }>>(
       `/items/${encodeURIComponent(itemId)}/prices`,
       accessToken,
       undefined,
       fetchFn,
-    ).catch(() => ({ prices: [] })),
+    ).catch((error) => {
+      if (error instanceof MlCommercialHttpError && error.status === 404) return { prices: [] }
+      throw error
+    }),
   ])
   const now = new Date().toISOString()
   const priceRows = Array.isArray(prices) ? prices : prices.prices ?? []
@@ -245,12 +251,18 @@ export async function fetchMlCommercialJson<T>(
     if (response.ok) return (await response.json()) as T
     if ((response.status === 429 || response.status >= 500) && attempt < MAX_ATTEMPTS - 1) continue
     const detail = (await response.text()).replace(/\s+/g, " ").slice(0, 240)
-    throw new Error(`Mercado Livre retornou ${response.status}${detail ? `: ${detail}` : "."}`)
+    throw new MlCommercialHttpError(response.status, detail)
   }
   throw new Error("Mercado Livre indisponível após novas tentativas.")
 }
 
 class MlTimeoutError extends Error {}
+
+export class MlCommercialHttpError extends Error {
+  constructor(public readonly status: number, detail = "") {
+    super(`Mercado Livre retornou ${status}${detail ? `: ${detail}` : "."}`)
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
