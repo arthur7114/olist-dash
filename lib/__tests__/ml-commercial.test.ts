@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fetchMlCommercialJson, normalizePromotion } from "@/lib/ml-commercial"
+import { fetchCommercialItemSnapshot, fetchMlCommercialJson, normalizePromotion } from "@/lib/ml-commercial"
 
 describe("normalizePromotion", () => {
   it("preserva apenas a redução explícita de tarifa e converte preços para centavos", () => {
@@ -64,5 +64,22 @@ describe("fetchMlCommercialJson", () => {
 
     await expectation
     vi.useRealTimers()
+  })
+})
+
+describe("fetchCommercialItemSnapshot", () => {
+  it("usa /prices como fallback quando /sale_price não traz valor", async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/items/MLB123")) return Response.json({ id: "MLB123", title: "Produto", price: 120, currency_id: "BRL" })
+      if (url.includes("/sale_price")) return Response.json({})
+      if (url.endsWith("/prices")) return Response.json({ prices: [{ amount: 115.5 }] })
+      return new Response("not found", { status: 404 })
+    })
+
+    const result = await fetchCommercialItemSnapshot("MLB123", "token", fetchFn)
+
+    expect(result.currentPriceCents).toBe(11_550)
+    expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 })

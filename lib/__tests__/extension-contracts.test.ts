@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { evaluatePromotionsRequestSchema, pricingOverrideSchema, refreshItemsRequestSchema } from "@oem/contracts"
+import { evaluatePromotionsRequestSchema, pricingOverrideSchema, pricingSettingsSchema, refreshItemsRequestSchema } from "@oem/contracts"
 
 describe("contratos da extensão", () => {
   it("limita avaliações e refreshes a 50 itens", () => {
@@ -17,5 +17,10 @@ describe("contratos da extensão", () => {
       fixedCostCents: null,
     })).toMatchObject({ productCostCents: 12_345, taxRateBps: 925 })
     expect(pricingOverrideSchema.safeParse({ itemId: "MLB123", taxRateBps: 9.25 }).success).toBe(false)
+  })
+
+  it("rejeita meta inferior à margem mínima", () => {
+    expect(pricingSettingsSchema.safeParse({ taxRateBps: 900, adsRateBps: 0, fixedCostCents: 0, minimumMarginBps: 1_500, targetMarginBps: 1_000 }).success).toBe(false)
+    expect(pricingOverrideSchema.safeParse({ itemId: "MLB123", minimumMarginBps: 1_500, targetMarginBps: 1_000 }).success).toBe(false)
   })
 })

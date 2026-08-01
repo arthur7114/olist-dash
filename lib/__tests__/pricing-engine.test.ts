@@ -84,6 +84,13 @@ describe("evaluatePricing", () => {
     expect(result.recommendation).toBe("incomplete")
     expect(result.blockedReasons).toContain("Dados essenciais desatualizados há mais de 24 horas.")
   })
+
+  it("bloqueia metas efetivas inconsistentes após aplicar overrides", () => {
+    const result = evaluatePricing(input({ minimumMarginBps: 2_000, targetMarginBps: 1_500 }), new Date("2026-08-01T13:00:00.000Z"))
+
+    expect(result.recommendation).toBe("incomplete")
+    expect(result.blockedReasons).toContain("Margem-alvo não pode ser inferior à margem mínima.")
+  })
 })
 
 describe("findPriceForMargin", () => {

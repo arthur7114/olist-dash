@@ -8,13 +8,14 @@ export const recommendationSchema = z.enum([
 ])
 export type PricingRecommendation = z.infer<typeof recommendationSchema>
 
-export const pricingSettingsSchema = z.object({
+const pricingSettingsBaseSchema = z.object({
   taxRateBps: z.number().int().min(0).max(10_000).nullable(),
   adsRateBps: z.number().int().min(0).max(10_000).default(0),
   fixedCostCents: z.number().int().min(0).default(0),
   minimumMarginBps: z.number().int().min(-10_000).max(10_000).nullable(),
   targetMarginBps: z.number().int().min(-10_000).max(10_000).nullable(),
 })
+export const pricingSettingsSchema = pricingSettingsBaseSchema.superRefine(validateMarginOrder)
 export type PricingSettings = z.infer<typeof pricingSettingsSchema>
 
 export const pricingOverrideSchema = z.object({
@@ -27,8 +28,21 @@ export const pricingOverrideSchema = z.object({
   fixedCostCents: z.number().int().min(0).nullable().optional(),
   minimumMarginBps: z.number().int().min(-10_000).max(10_000).nullable().optional(),
   targetMarginBps: z.number().int().min(-10_000).max(10_000).nullable().optional(),
-})
+}).superRefine(validateMarginOrder)
 export type PricingOverride = z.infer<typeof pricingOverrideSchema>
+
+function validateMarginOrder(
+  value: { minimumMarginBps?: number | null; targetMarginBps?: number | null },
+  context: z.RefinementCtx,
+) {
+  if (value.minimumMarginBps != null && value.targetMarginBps != null && value.targetMarginBps < value.minimumMarginBps) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["targetMarginBps"],
+      message: "A margem-alvo não pode ser inferior à margem mínima.",
+    })
+  }
+}
 
 export const pricingBreakdownSchema = z.object({
   revenueCents: z.number().int(),

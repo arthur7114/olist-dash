@@ -35,6 +35,9 @@ export function evaluatePricing(
   if (input.taxRateBps == null) blockedReasons.push("Imposto padrão não configurado.")
   if (input.minimumMarginBps == null) blockedReasons.push("Margem mínima não configurada.")
   if (input.targetMarginBps == null) blockedReasons.push("Margem-alvo não configurada.")
+  if (input.minimumMarginBps != null && input.targetMarginBps != null && input.targetMarginBps < input.minimumMarginBps) {
+    blockedReasons.push("Margem-alvo não pode ser inferior à margem mínima.")
+  }
 
   const updatedAtMs = input.requiredUpdatedAt ? Date.parse(input.requiredUpdatedAt) : Number.NaN
   const stale = Number.isFinite(updatedAtMs) && now.getTime() - updatedAtMs > MAX_ESSENTIAL_AGE_MS

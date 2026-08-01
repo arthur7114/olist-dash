@@ -11,6 +11,7 @@ export interface MlCommercialItem {
   listing_type_id?: string
   currency_id?: string
   status?: string
+  price?: number
   shipping?: {
     mode?: string
     logistic_type?: string
@@ -67,7 +68,7 @@ export async function fetchCommercialItemSnapshot(
   accessToken: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<CommercialItemSnapshot> {
-  const [item, salePrice] = await Promise.all([
+  const [item, salePrice, prices] = await Promise.all([
     fetchMlCommercialJson<MlCommercialItem>(`/items/${encodeURIComponent(itemId)}`, accessToken, undefined, fetchFn),
     fetchMlCommercialJson<{ amount?: number }>(
       `/items/${encodeURIComponent(itemId)}/sale_price`,
@@ -75,8 +76,15 @@ export async function fetchCommercialItemSnapshot(
       { context: "channel_marketplace" },
       fetchFn,
     ).catch(() => ({ amount: undefined })),
+    fetchMlCommercialJson<{ prices?: Array<{ amount?: number }> } | Array<{ amount?: number }>>(
+      `/items/${encodeURIComponent(itemId)}/prices`,
+      accessToken,
+      undefined,
+      fetchFn,
+    ).catch(() => ({ prices: [] })),
   ])
   const now = new Date().toISOString()
+  const priceRows = Array.isArray(prices) ? prices : prices.prices ?? []
   return {
     itemId: String(item.id || itemId),
     sellerSku: cleanString(item.seller_custom_field),
@@ -84,12 +92,12 @@ export async function fetchCommercialItemSnapshot(
     categoryId: cleanString(item.category_id),
     listingTypeId: cleanString(item.listing_type_id),
     currencyId: cleanString(item.currency_id) ?? "BRL",
-    currentPriceCents: moneyToCents(salePrice.amount),
+    currentPriceCents: moneyToCents(salePrice.amount ?? priceRows.find((price) => price.amount != null)?.amount ?? item.price),
     status: cleanString(item.status) ?? "unknown",
     shippingMode: cleanString(item.shipping?.mode),
     logisticType: cleanString(item.shipping?.logistic_type),
     freeShipping: Boolean(item.shipping?.free_shipping),
-    raw: { item, salePrice },
+    raw: { item, salePrice, prices },
     syncedAt: now,
   }
 }
