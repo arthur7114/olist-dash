@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  transpilePackages: ["@oem/contracts"],
   typescript: {
     ignoreBuildErrors: true,
   },

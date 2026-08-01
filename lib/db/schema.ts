@@ -127,3 +127,89 @@ export const olistCredentials = pgTable("olist_credentials", {
   accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Catálogo comercial do Mercado Livre usado pela calculadora e pela extensão.
+export const mlItems = pgTable(
+  "ml_items",
+  {
+    itemId: text("item_id").primaryKey(),
+    sellerSku: text("seller_sku"),
+    title: text("title").notNull().default(""),
+    categoryId: text("category_id"),
+    listingTypeId: text("listing_type_id"),
+    currencyId: text("currency_id").notNull().default("BRL"),
+    currentPrice: numeric("current_price", { precision: 16, scale: 2 }),
+    status: text("status").notNull().default("unknown"),
+    shippingMode: text("shipping_mode"),
+    logisticType: text("logistic_type"),
+    freeShipping: integer("free_shipping").notNull().default(0),
+    raw: jsonb("raw"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    skuIdx: index("ml_items_seller_sku_idx").on(t.sellerSku),
+    statusIdx: index("ml_items_status_idx").on(t.status),
+  }),
+)
+
+export const mlPromotions = pgTable(
+  "ml_promotions",
+  {
+    key: text("key").primaryKey(),
+    itemId: text("item_id").notNull(),
+    promotionId: text("promotion_id").notNull(),
+    offerId: text("offer_id"),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("unknown"),
+    name: text("name").notNull().default(""),
+    originalPrice: numeric("original_price", { precision: 16, scale: 2 }),
+    candidatePrice: numeric("candidate_price", { precision: 16, scale: 2 }),
+    minPrice: numeric("min_price", { precision: 16, scale: 2 }),
+    maxPrice: numeric("max_price", { precision: 16, scale: 2 }),
+    suggestedPrice: numeric("suggested_price", { precision: 16, scale: 2 }),
+    feeReduction: numeric("fee_reduction", { precision: 16, scale: 2 }).notNull().default("0"),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    itemIdx: index("ml_promotions_item_id_idx").on(t.itemId),
+    statusIdx: index("ml_promotions_status_idx").on(t.status),
+    syncedIdx: index("ml_promotions_synced_at_idx").on(t.syncedAt),
+  }),
+)
+
+export const pricingSettings = pgTable("pricing_settings", {
+  id: integer("id").primaryKey().default(1),
+  taxRateBps: integer("tax_rate_bps"),
+  adsRateBps: integer("ads_rate_bps").notNull().default(0),
+  fixedCost: numeric("fixed_cost", { precision: 16, scale: 2 }).notNull().default("0"),
+  minimumMarginBps: integer("minimum_margin_bps"),
+  targetMarginBps: integer("target_margin_bps"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const pricingOverrides = pgTable("pricing_overrides", {
+  itemId: text("item_id").primaryKey(),
+  sellerSku: text("seller_sku"),
+  productCost: numeric("product_cost", { precision: 16, scale: 2 }),
+  shippingCost: numeric("shipping_cost", { precision: 16, scale: 2 }),
+  taxRateBps: integer("tax_rate_bps"),
+  adsRateBps: integer("ads_rate_bps"),
+  fixedCost: numeric("fixed_cost", { precision: 16, scale: 2 }),
+  minimumMarginBps: integer("minimum_margin_bps"),
+  targetMarginBps: integer("target_margin_bps"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const mlCommercialSyncState = pgTable("ml_commercial_sync_state", {
+  id: integer("id").primaryKey().default(1),
+  status: text("status").notNull().default("idle"),
+  cursor: text("cursor"),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  itemsSynced: integer("items_synced").notNull().default(0),
+  promotionsSynced: integer("promotions_synced").notNull().default(0),
+})
