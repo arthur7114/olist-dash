@@ -6,6 +6,8 @@ const MAX_ATTEMPTS = 4
 export interface MlCommercialItem {
   id: string
   seller_custom_field?: string | null
+  attributes?: Array<{ id?: string; value_name?: string | null }> | null
+  variations?: Array<{ seller_custom_field?: string | null }> | null
   title?: string
   category_id?: string
   listing_type_id?: string
@@ -93,7 +95,7 @@ export async function fetchCommercialItemSnapshot(
   const priceRows = Array.isArray(prices) ? prices : prices.prices ?? []
   return {
     itemId: String(item.id || itemId),
-    sellerSku: cleanString(item.seller_custom_field),
+    sellerSku: resolveSellerSku(item),
     title: cleanString(item.title) ?? String(item.id || itemId),
     categoryId: cleanString(item.category_id),
     listingTypeId: cleanString(item.listing_type_id),
@@ -266,6 +268,17 @@ export class MlCommercialHttpError extends Error {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+}
+
+// A conta OEM não preenche seller_custom_field: o SKU vem no atributo SELLER_SKU.
+// Anúncios com variação podem trazê-lo apenas dentro de variations.
+export function resolveSellerSku(item: MlCommercialItem): string | null {
+  const attribute = item.attributes?.find((entry) => entry.id === "SELLER_SKU")
+  return (
+    cleanString(item.seller_custom_field) ??
+    cleanString(attribute?.value_name) ??
+    cleanString(item.variations?.find((variation) => cleanString(variation.seller_custom_field))?.seller_custom_field)
+  )
 }
 
 function cleanString(value: unknown): string | null {

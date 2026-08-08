@@ -82,4 +82,38 @@ describe("fetchCommercialItemSnapshot", () => {
     expect(result.currentPriceCents).toBe(11_550)
     expect(fetchFn).toHaveBeenCalledTimes(3)
   })
+
+  it("lê o SKU do atributo SELLER_SKU quando seller_custom_field vem vazio", async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/items/MLB123"))
+        return Response.json({
+          id: "MLB123",
+          seller_custom_field: "",
+          attributes: [{ id: "BRAND", value_name: "OEM" }, { id: "SELLER_SKU", value_name: "6107" }],
+        })
+      return Response.json({})
+    })
+
+    const result = await fetchCommercialItemSnapshot("MLB123", "token", fetchFn)
+
+    expect(result.sellerSku).toBe("6107")
+  })
+
+  it("cai para o SKU da variação quando o anúncio não traz nenhum dos dois", async () => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith("/items/MLB123"))
+        return Response.json({
+          id: "MLB123",
+          attributes: [{ id: "BRAND", value_name: "OEM" }],
+          variations: [{ seller_custom_field: null }, { seller_custom_field: "9040" }],
+        })
+      return Response.json({})
+    })
+
+    const result = await fetchCommercialItemSnapshot("MLB123", "token", fetchFn)
+
+    expect(result.sellerSku).toBe("9040")
+  })
 })

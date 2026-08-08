@@ -34,7 +34,9 @@ export async function upsertMlItems(rows: CommercialItemSnapshot[]): Promise<voi
   }))).onConflictDoUpdate({
     target: mlItems.itemId,
     set: {
-      sellerSku: sql`excluded.seller_sku`,
+      // Preserva o SKU já conhecido quando o anúncio não devolve um: sem isso a
+      // sincronização apaga o SKU vindo do histórico de pedidos e o custo se perde.
+      sellerSku: sql`coalesce(excluded.seller_sku, ${mlItems.sellerSku})`,
       title: sql`excluded.title`,
       categoryId: sql`excluded.category_id`,
       listingTypeId: sql`excluded.listing_type_id`,
