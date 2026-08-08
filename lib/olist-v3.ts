@@ -912,7 +912,10 @@ async function fetchRecentReceivables(accessToken: string) {
 // ---------------------------------------------------------------------------
 
 // Lista contas a receber emitidas na janela (todas as situações — quem decide o
-// que fazer com "pago"/"aberto" é o chamador). Paginação no molde das demais.
+// que fazer com "pago"/"aberto" é o chamador). Paginação no molde das demais,
+// MAS sem tolerar resultado parcial: a conciliação usa a AUSÊNCIA de conta como
+// veredito (receivable_not_found), então um índice truncado por 429 geraria
+// falso negativo em massa. Rate limit persistente após os retries = erro.
 export async function fetchReceivablesByEmissionRange(
   accessToken: string,
   dataInicialEmissao: string,
@@ -932,16 +935,10 @@ export async function fetchReceivablesByEmissionRange(
       dataInicialEmissao,
       dataFinalEmissao,
     })
-    let list: TinyListResponse<TinyReceivable>
-    try {
-      list = await tinyFetch<TinyListResponse<TinyReceivable>>(
-        accessToken,
-        `/contas-receber?${params.toString()}`,
-      )
-    } catch (err) {
-      if (err instanceof TinyApiError && err.status === 429 && items.length > 0) break
-      throw err
-    }
+    const list = await tinyFetch<TinyListResponse<TinyReceivable>>(
+      accessToken,
+      `/contas-receber?${params.toString()}`,
+    )
     const pageItems = list.itens ?? []
     items.push(...pageItems)
     total = list.paginacao?.total ?? items.length
@@ -949,6 +946,12 @@ export async function fetchReceivablesByEmissionRange(
     offset += limit
   }
 
+  if (items.length < Math.min(total, maxItems)) {
+    throw new TinyApiError(
+      `Listagem de contas a receber incompleta (${items.length} de ${total}); abortando para não gerar falso receivable_not_found.`,
+      429,
+    )
+  }
   return items.slice(0, maxItems)
 }
 
