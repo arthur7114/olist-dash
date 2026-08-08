@@ -15,7 +15,13 @@ export type MpPaymentRelease = {
   amount: number
 }
 
-export type ReleaseStatus = "released" | "pending" | "no_payments" | "not_found"
+// "disputed" = existe pagamento, mas nenhum aprovado e algum está em mediação
+// (in_mediation) ou em análise. Separado de "no_payments" porque a conta a
+// receber correspondente fica legitimamente aberta e precisa ser auditável: o
+// dinheiro pode até estar liberado, mas ainda pode ser revertido.
+export type ReleaseStatus = "released" | "pending" | "disputed" | "no_payments" | "not_found"
+
+const DISPUTED_PAYMENT_STATUS = ["in_mediation", "in_process", "pending", "authorized", "charged_back"]
 
 export type MlOrderRelease = {
   mlOrderId: string
@@ -37,10 +43,21 @@ type MpPayment = {
 // Agrega os pagamentos de um pedido/pack num veredito único. Só pagamentos
 // aprovados contam: released exige TODOS os aprovados liberados (um pack com um
 // pagamento pendente ainda não pode ser baixado). Sem nenhum aprovado, não há o
-// que conciliar (cancelado/devolvido fica de fora — devolução é outro fluxo).
+// que conciliar (cancelado/devolvido fica de fora — devolução é outro fluxo),
+// exceto quando há disputa em curso, que ganha veredito próprio.
 export function aggregateRelease(mlOrderId: string, payments: MpPaymentRelease[]): MlOrderRelease {
   const approved = payments.filter((p) => p.status === "approved")
   if (!approved.length) {
+    const disputed = payments.filter((p) => DISPUTED_PAYMENT_STATUS.includes(p.status ?? ""))
+    if (disputed.length) {
+      return {
+        mlOrderId,
+        releaseStatus: "disputed",
+        releaseDate: null,
+        amount: Math.round(disputed.reduce((sum, p) => sum + p.amount, 0) * 100) / 100,
+        payments,
+      }
+    }
     return { mlOrderId, releaseStatus: "no_payments", releaseDate: null, amount: 0, payments }
   }
   const released = approved.every((p) => p.moneyReleaseStatus === "released")

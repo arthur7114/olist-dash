@@ -45,6 +45,30 @@ describe("aggregateRelease", () => {
     expect(aggregateRelease("123", []).releaseStatus).toBe("no_payments")
     expect(aggregateRelease("123", [payment({ status: "refunded" })]).releaseStatus).toBe("no_payments")
   })
+
+  it("pagamento em mediação vira 'disputed', não 'no_payments'", () => {
+    // Caso real: pedido entregue, dinheiro até liberado, mas em mediação no ML —
+    // pode ser revertido, então a conta a receber fica aberta de propósito.
+    const result = aggregateRelease("123", [
+      payment({ status: "in_mediation", moneyReleaseStatus: "released", amount: 77.6 }),
+    ])
+    expect(result.releaseStatus).toBe("disputed")
+    expect(result.amount).toBe(77.6)
+    expect(result.releaseDate).toBeNull()
+  })
+
+  it("chargeback também conta como disputa", () => {
+    expect(aggregateRelease("123", [payment({ status: "charged_back" })]).releaseStatus).toBe("disputed")
+  })
+
+  it("disputa não vence pagamento aprovado e liberado", () => {
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, status: "in_mediation", amount: 10 }),
+      payment({ paymentId: 2, status: "approved", amount: 20 }),
+    ])
+    expect(result.releaseStatus).toBe("released")
+    expect(result.amount).toBe(20)
+  })
 })
 
 describe("fetchMlOrderRelease", () => {

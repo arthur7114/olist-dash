@@ -14,6 +14,12 @@ export type MpReleaseCandidate = {
 // pago, sem pagamento aprovado ou inexistente no ML) saem da fila.
 // `situacao in (1,3,4,5,6,7)` = mesmas situações que o dash trata como "Pago"
 // (exclui cancelado/2 e "Em aberto"/8).
+// Quem já foi verificado nas últimas RECHECK_HOURS fica de fora: é o que faz as
+// execuções encadeadas do workflow convergirem para completed=true em vez de
+// re-verificar eternamente os pendentes e os sem-conta (pedidos de mai/2026,
+// anteriores ao financeiro da Olist, nunca terão conta a receber).
+const RECHECK_HOURS = Number(process.env.MP_RECONCILE_RECHECK_HOURS) || 20
+
 export async function getMpReleaseCandidates(
   sinceDate: string,
   limit: number,
@@ -31,8 +37,15 @@ export async function getMpReleaseCandidates(
       and coalesce(o.raw->'ecommerce'->>'numeroPedidoEcommerce', '') <> ''
       and (
         r.olist_id is null
-        or r.release_status = 'pending'
-        or (r.release_status = 'released' and r.baixa_status not in ('done', 'already_paid'))
+        or (
+          (
+            -- 'disputed' volta à fila porque mediação se resolve: quando o
+            -- pagamento é aprovado e liberado, a baixa passa a ser devida.
+            r.release_status in ('pending', 'disputed')
+            or (r.release_status = 'released' and r.baixa_status not in ('done', 'already_paid'))
+          )
+          and r.checked_at < now() - make_interval(hours => ${RECHECK_HOURS})
+        )
       )
     order by r.checked_at asc nulls first, o.data asc
     limit ${limit}
