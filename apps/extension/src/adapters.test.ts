@@ -43,6 +43,50 @@ describe("adaptadores do Mercado Livre", () => {
     expect(second[0].key).not.toBe(first[0].key)
   })
 
+  it("sobe até o bloco que tem preço quando o id está num card sem R$", () => {
+    document.body.innerHTML = `
+      <li>
+        <span>R$ 1.920,23</span>
+        <section>
+          <a href="/anuncios/MLB6443601210">Ofereça envios no mesmo dia</a>
+          <button>Oferecer envio</button>
+        </section>
+      </li>`
+
+    const targets = findCommercialTargets()
+
+    expect(targets).toHaveLength(1)
+    expect(targets[0].priceCents).toBe(192_023)
+    expect(targets[0].anchor.tagName).toBe("LI")
+  })
+
+  it("não sobe até um container que agrupe vários anúncios", () => {
+    document.body.innerHTML = `
+      <div>
+        <li><a href="/anuncios/MLB111111111">Primeiro</a></li>
+        <li><a href="/anuncios/MLB222222222">Segundo</a></li>
+        <span>R$ 500,00</span>
+      </div>`
+
+    const targets = findCommercialTargets()
+
+    expect(targets).toHaveLength(2)
+    expect(targets.map((target) => target.priceCents)).toEqual([null, null])
+  })
+
+  it("monta um alvo só quando o anúncio aparece em dois blocos", () => {
+    document.body.innerHTML = `
+      <li>
+        <section><a href="/anuncios/MLB6443601210">Tarefa pendente</a></section>
+        <div><a href="/anuncios/MLB6443601210">Editar</a><span>R$ 149,90</span></div>
+      </li>`
+
+    const targets = findCommercialTargets()
+
+    expect(targets).toHaveLength(1)
+    expect(targets[0].priceCents).toBe(14_990)
+  })
+
   it("reconhece navegação SPA ao trocar a URL suportada", () => {
     expect(isSupportedCommercialPage(new URL("https://www.mercadolivre.com.br/anuncios/lista"))).toBe(true)
     expect(isSupportedCommercialPage(new URL("https://www.mercadolivre.com.br/vendas/lista"))).toBe(false)
