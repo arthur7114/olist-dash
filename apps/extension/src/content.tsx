@@ -209,10 +209,11 @@ function drainRequestQueue() {
 }
 
 const SHADOW_CSS = `
-  :host { position: relative; display: inline-flex; margin: 6px; font-family: Inter,Arial,sans-serif; z-index: 20; }
+  :host { position: relative; display: inline-flex; margin: 6px; font-family: Inter,Arial,sans-serif; font-size: 12px; line-height: 1.2; vertical-align: middle; z-index: 20; }
   * { box-sizing: border-box; }
   .oem-shell { position: relative; display: inline-flex; }
-  .oem-badge { border: 0; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 700; cursor: pointer; color: #344054; background: #f2f4f7; }
+  /* nowrap: a pilula herdava a largura estreita do card e quebrava em duas linhas. */
+  .oem-badge { border: 0; border-radius: 999px; padding: 5px 10px; font-family: inherit; font-size: 12px; line-height: 1.2; font-weight: 600; white-space: nowrap; cursor: pointer; color: #344054; background: #f2f4f7; }
   .oem-badge.recommended { color: #067647; background: #ecfdf3; }
   .oem-badge.review { color: #b54708; background: #fffaeb; }
   .oem-badge.avoid { color: #b42318; background: #fef3f2; }

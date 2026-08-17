@@ -36,9 +36,9 @@ describe("aplicarBaseValor", () => {
     expect(out[0].valorVenda).toBe(90)
   })
 
-  it("modo nota: pedido sem NF vira 0", () => {
+  it("modo nota: pedido sem NF é descartado (recorte só faturados)", () => {
     const out = aplicarBaseValor([pedido({ valorVenda: 100, valorNota: undefined })], "nota")
-    expect(out[0].valorVenda).toBe(0)
+    expect(out).toHaveLength(0)
   })
 
   it("modo nota: não muta os pedidos de entrada", () => {
@@ -49,12 +49,13 @@ describe("aplicarBaseValor", () => {
 })
 
 describe("aplicarBaseValor — composição com agregação", () => {
-  it("soma de valorVenda no modo nota usa valorNota (0 quando ausente)", () => {
+  it("soma de valorVenda no modo nota usa valorNota e ignora pedidos sem NF", () => {
     const pedidos = [
       pedido({ id: "a", valorVenda: 100, valorNota: 90 }),
       pedido({ id: "b", valorVenda: 50, valorNota: undefined }),
     ]
-    const total = aplicarBaseValor(pedidos, "nota").reduce((s, p) => s + p.valorVenda, 0)
-    expect(total).toBe(90)
+    const out = aplicarBaseValor(pedidos, "nota")
+    expect(out).toHaveLength(1)
+    expect(out.reduce((s, p) => s + p.valorVenda, 0)).toBe(90)
   })
 })

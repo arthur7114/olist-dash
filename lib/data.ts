@@ -493,10 +493,15 @@ export function statusPorSituacao(
 // Base de valor usada nos números do dashboard: valor de venda (padrão) ou valor da NF.
 export type BaseValor = "venda" | "nota"
 
-// Troca a base monetária "na fonte": em modo "nota", cada pedido passa a expor o valor
-// da NF em valorVenda (0 quando não há NF), de modo que TODA agregação que lê valorVenda
-// (KPIs, séries, curva ABC, devoluções) reflita a nova base sem alteração própria.
+// Troca a base monetária "na fonte": em modo "nota" o recorte é "só faturados" —
+// pedidos SEM NF são descartados por inteiro (não são venda realizada ainda) e os
+// demais passam a expor o valor da NF em valorVenda. Descartar o pedido inteiro (em
+// vez de só zerar a receita) evita o prejuízo fantasma de somar o custo de um pedido
+// cuja receita foi zerada. Assim TODA agregação que lê valorVenda (KPIs, séries,
+// curva ABC, devoluções) reflete a nova base sem alteração própria.
 export function aplicarBaseValor(pedidos: Pedido[], base: BaseValor): Pedido[] {
   if (base === "venda") return pedidos
-  return pedidos.map((p) => ({ ...p, valorVenda: p.valorNota ?? 0 }))
+  return pedidos
+    .filter((p) => p.valorNota != null)
+    .map((p) => ({ ...p, valorVenda: p.valorNota as number }))
 }
