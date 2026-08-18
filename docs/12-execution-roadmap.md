@@ -9,4 +9,6 @@ Implementado o plano em `docs/superpowers/plans/2026-07-04-fase1-margem-ml-skus-
 - **Correções de base**: encoding das formas de pagamento, status de pagamento derivado da situação (Aprovado = Pago), períodos novos (90d, mês atual, mês anterior, personalizado) com janela de comparação real, variação % real nos KPIs.
 - **Páginas novas**: "Produtos e SKUs" (`/produtos`) e "Devoluções" (`/devolucoes`), com KPIs, gráficos, tabela avançada (busca/ordenação/paginação/export CSV) e drawers de detalhe.
 
+- **Conciliação Mercado Pago → Olist**: job diário (`/api/mp/reconcile`, workflow `mp-reconcile.yml`) verifica a liberação do dinheiro dos pedidos ML (`money_release_status` via API do Mercado Pago, mesmo token client_credentials do ML) e dá baixa automática na conta a receber correspondente na Olist (vínculo pelo "OC nº" no histórico da conta). Estado idempotente em `mp_releases`; `?dryRun=1` só relata.
+
 Ver o plano acima para o detalhamento tarefa a tarefa e o backlog priorizado das próximas fases (Qualidade dos Dados, Margem e Rentabilidade, Autenticação, etc.).

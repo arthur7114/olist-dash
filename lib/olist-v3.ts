@@ -193,6 +193,22 @@ type TinyReceivableListItem = {
 
 type TinyReceivableDetail = TinyReceivableListItem
 
+// Conta a receber como vem na listagem, com os campos usados pela conciliação
+// MP→Olist. O vínculo com o pedido do ML é o "OC nº {numeroPedidoEcommerce}"
+// no historico (o filtro idVenda não retorna as contas geradas pela integração
+// do Mercado Livre — validado ao vivo na conta real).
+export type TinyReceivable = {
+  id?: number
+  situacao?: "aberto" | "cancelada" | "pago" | "parcial" | "prevista" | "atrasadas" | "emissao" | string
+  data?: string
+  dataVencimento?: string
+  historico?: string
+  valor?: number
+  saldo?: number
+  numeroDocumento?: string
+  serieDocumento?: string
+}
+
 export function getBaseUrl(request: Request) {
   const configured = process.env.OLIST_REDIRECT_BASE_URL
   if (configured) return configured.replace(/\/$/, "")
@@ -535,21 +551,33 @@ function getRetryDelayMs(response: Response, attempt: number): number {
   return exp + Math.random() * 0.3 * exp
 }
 
-async function tinyFetch<T>(accessToken: string, path: string, maxRetries = MAX_RETRIES): Promise<T> {
+async function tinyFetch<T>(
+  accessToken: string,
+  path: string,
+  init?: { method?: string; body?: unknown },
+  maxRetries = MAX_RETRIES,
+): Promise<T> {
   let attempt = 0
+  const isMutation = init?.method && init.method !== "GET"
   while (true) {
     attempt++
     await acquireRateSlot()
     const response = await fetch(`${OLIST_API_URL}${path}`, {
+      method: init?.method ?? "GET",
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
+        ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
       cache: "no-store",
     })
 
     if (!response.ok) {
-      if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
+      // Mutações não são reexecutadas em 5xx: o servidor pode ter aplicado a
+      // escrita antes de falhar a resposta, e repetir duplicaria o efeito.
+      const retryable = response.status === 429 || (!isMutation && response.status >= 500)
+      if (retryable && attempt < maxRetries) {
         await delay(getRetryDelayMs(response, attempt))
         continue
       }
@@ -557,6 +585,7 @@ async function tinyFetch<T>(accessToken: string, path: string, maxRetries = MAX_
       throw new TinyApiError(`Olist ERP API v3 ${path} retornou ${response.status}: ${body}`, response.status)
     }
 
+    if (response.status === 204) return undefined as T
     return (await response.json()) as T
   }
 }
@@ -876,6 +905,100 @@ async function fetchRecentReceivables(accessToken: string) {
   }
 
   return items.slice(0, 300)
+}
+
+// ---------------------------------------------------------------------------
+// Conciliação MP→Olist: busca de contas a receber por janela de emissão e baixa.
+// ---------------------------------------------------------------------------
+
+// Lista contas a receber emitidas na janela (todas as situações — quem decide o
+// que fazer com "pago"/"aberto" é o chamador). Paginação no molde das demais,
+// MAS sem tolerar resultado parcial: a conciliação usa a AUSÊNCIA de conta como
+// veredito (receivable_not_found), então um índice truncado por 429 geraria
+// falso negativo em massa. Rate limit persistente após os retries = erro.
+export async function fetchReceivablesByEmissionRange(
+  accessToken: string,
+  dataInicialEmissao: string,
+  dataFinalEmissao: string,
+  maxItems = 5000,
+): Promise<TinyReceivable[]> {
+  const items: TinyReceivable[] = []
+  const limit = 100
+  let offset = 0
+  let total = Number.POSITIVE_INFINITY
+
+  while (offset < total && items.length < maxItems) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      orderBy: "desc",
+      dataInicialEmissao,
+      dataFinalEmissao,
+    })
+    const list = await tinyFetch<TinyListResponse<TinyReceivable>>(
+      accessToken,
+      `/contas-receber?${params.toString()}`,
+    )
+    const pageItems = list.itens ?? []
+    items.push(...pageItems)
+    total = list.paginacao?.total ?? items.length
+    if (pageItems.length < limit) break
+    offset += limit
+  }
+
+  if (items.length < Math.min(total, maxItems)) {
+    throw new TinyApiError(
+      `Listagem de contas a receber incompleta (${items.length} de ${total}); abortando para não gerar falso receivable_not_found.`,
+      429,
+    )
+  }
+  return items.slice(0, maxItems)
+}
+
+// Extrai o número do pedido do e-commerce ("OC nº 2000014421256617") do
+// historico da conta a receber. Aceita "nº", "no", "n°" e afins.
+export function extractOcNumber(historico: string | undefined): string | undefined {
+  if (!historico) return undefined
+  const match = historico.match(/OC\s*n[ºo°.]*\s*(\d{6,})/i)
+  return match?.[1]
+}
+
+// Situações que ainda têm saldo a receber e podem ser baixadas.
+export function isReceivableOpen(receivable: TinyReceivable): boolean {
+  return ["aberto", "parcial", "prevista", "atrasadas"].includes(receivable.situacao ?? "")
+}
+
+export type BaixaContaReceber = {
+  valorPago: number
+  data: Date
+  historico?: string
+}
+
+// O swagger da v3 documenta o campo `data` do POST /baixar como dd/mm/yyyy
+// (diferente das listagens, que usam yyyy-mm-dd). Dia contábil de Fortaleza.
+export function buildBaixaBody(baixa: BaixaContaReceber) {
+  return {
+    data: formatDateBr(baixa.data),
+    valorPago: Math.round(baixa.valorPago * 100) / 100,
+    ...(baixa.historico ? { historico: baixa.historico } : {}),
+  }
+}
+
+export function formatDateBr(date: Date, timeZone = "America/Fortaleza"): string {
+  return new Intl.DateTimeFormat("pt-BR", { timeZone, day: "2-digit", month: "2-digit", year: "numeric" }).format(date)
+}
+
+// Dá baixa (liquida) uma conta a receber. 204 = sucesso. NÃO faz retry em 5xx
+// (ver tinyFetch): baixar duas vezes duplicaria o recebimento no ERP.
+export async function baixarContaReceber(
+  accessToken: string,
+  idContaReceber: number,
+  baixa: BaixaContaReceber,
+): Promise<void> {
+  await tinyFetch<void>(accessToken, `/contas-receber/${idContaReceber}/baixar`, {
+    method: "POST",
+    body: buildBaixaBody(baixa),
+  })
 }
 
 function findReceivableOrder(

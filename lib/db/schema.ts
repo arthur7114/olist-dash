@@ -67,6 +67,28 @@ export const mlOrderCosts = pgTable("ml_order_costs", {
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Conciliação Mercado Pago → Olist: liberação do dinheiro (money_release) por
+// pedido ML e estado da baixa no contas a receber. 1 linha por pedido Olist;
+// é o que torna o job idempotente (não rebaixa o que já foi baixado).
+export const mpReleases = pgTable(
+  "mp_releases",
+  {
+    olistId: text("olist_id").primaryKey(),
+    mlOrderId: text("ml_order_id").notNull(),
+    releaseStatus: text("release_status").notNull().default("unknown"), // released | pending | no_payments | not_found
+    releaseDate: timestamp("release_date", { withTimezone: true }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    receivableId: integer("receivable_id"),
+    baixaStatus: text("baixa_status").notNull().default("pending"), // pending | done | already_paid | receivable_not_found | error
+    baixaAt: timestamp("baixa_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("mp_releases_status_idx").on(t.releaseStatus, t.baixaStatus),
+  }),
+)
+
 // Agregado mensal direto do Mercado Livre para a visão Evolução de produtos.
 // Mantém as duas bases lado a lado para a alternância ser instantânea no cliente.
 export const mlProductMonthlyMetrics = pgTable(

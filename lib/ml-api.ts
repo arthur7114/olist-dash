@@ -46,11 +46,12 @@ export type MlOrderCost = {
   raw: unknown
 }
 
-type MlOrder = {
+export type MlOrder = {
   id?: number
   status?: string
   shipping?: { id?: number }
   order_items?: Array<{ quantity?: number; sale_fee?: number; listing_type_id?: string }>
+  payments?: Array<{ id?: number; status?: string }>
 }
 
 type MlPack = {
@@ -66,17 +67,19 @@ type MlShipmentCosts = { senders?: Array<{ cost?: number }> }
 // fecha vários itens do mesmo vendedor num único checkout. Quando /orders/{id}
 // dá 404, tentamos /packs/{id}: o pack agrega os order_ids reais e o shipment
 // (frete é por pacote, não por pedido individual).
-export async function fetchMlOrderCost(
+export type ResolvedMlOrders = { orders: MlOrder[]; packShipmentId?: number }
+
+export async function resolveMlOrders(
   mlOrderId: string,
   accessToken: string,
   fetchFn: typeof fetch = fetch,
-): Promise<MlOrderCost | null> {
+): Promise<ResolvedMlOrders | null> {
   const headers = { Authorization: `Bearer ${accessToken}` }
 
   const orderRes = await fetchFn(`${ML_API_URL}/orders/${mlOrderId}`, { headers, cache: "no-store" })
   if (orderRes.ok) {
     const order = (await orderRes.json()) as MlOrder
-    return buildCost(mlOrderId, [order], order.shipping?.id, headers, fetchFn)
+    return { orders: [order] }
   }
   if (orderRes.status !== 404) {
     throw new Error(`ML /orders/${mlOrderId} retornou ${orderRes.status}: ${await orderRes.text()}`)
@@ -100,7 +103,21 @@ export async function fetchMlOrderCost(
   const validOrders = orders.filter((o): o is MlOrder => o !== null)
   if (!validOrders.length) return null
 
-  return buildCost(mlOrderId, validOrders, pack.shipment?.id, headers, fetchFn)
+  return { orders: validOrders, packShipmentId: pack.shipment?.id }
+}
+
+export async function fetchMlOrderCost(
+  mlOrderId: string,
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<MlOrderCost | null> {
+  const resolved = await resolveMlOrders(mlOrderId, accessToken, fetchFn)
+  if (!resolved) return null
+  const shippingId =
+    resolved.orders.length === 1 && resolved.packShipmentId === undefined
+      ? resolved.orders[0].shipping?.id
+      : resolved.packShipmentId
+  return buildCost(mlOrderId, resolved.orders, shippingId, { Authorization: `Bearer ${accessToken}` }, fetchFn)
 }
 
 async function buildCost(

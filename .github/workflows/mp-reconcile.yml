@@ -1,0 +1,55 @@
+name: Mercado Pago reconcile
+
+on:
+  schedule:
+    # 06:00 em America/Fortaleza, depois do sync noturno da Olist.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Só relatar o que seria baixado, sem baixar?"
+        required: false
+        type: boolean
+        default: false
+      days:
+        description: "Janela de pedidos em dias (padrão 90)"
+        required: false
+        default: ""
+
+concurrency:
+  group: mp-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile Mercado Pago releases into Olist
+        env:
+          BASE_URL: ${{ vars.OLIST_BASE_URL || 'https://olist-dash.vercel.app' }}
+          SYNC_SECRET: ${{ secrets.OLIST_SYNC_SECRET }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          DAYS: ${{ inputs.days || '' }}
+        run: |
+          set -euo pipefail
+          URL="$BASE_URL/api/mp/reconcile"
+          SEP="?"
+          if [ "$DRY_RUN" = "true" ]; then URL="$URL${SEP}dryRun=1"; SEP="&"; fi
+          if [ -n "$DAYS" ]; then URL="$URL${SEP}days=$DAYS"; fi
+
+          completed=false
+          for attempt in $(seq 1 6); do
+            if ! response=$(curl -fsS -X POST "$URL" -H "Authorization: Bearer $SYNC_SECRET" -m 280); then
+              echo "Tentativa $attempt falhou; o estado persistido será retomado." >&2
+              if [ "$attempt" -lt 6 ]; then sleep $((attempt * 5)); fi
+              continue
+            fi
+            echo "$response" | jq '{ok, dryRun, candidates, checked, released, baixados, alreadyPaid, receivableNotFound, mlNotFound, errors, completed, stats}'
+            completed=$(echo "$response" | jq -r '.completed // false')
+            if [ "$completed" = "true" ]; then break; fi
+          done
+
+          if [ "$completed" != "true" ]; then
+            echo "A conciliação não concluiu dentro de seis execuções retomáveis." >&2
+            exit 1
+          fi
