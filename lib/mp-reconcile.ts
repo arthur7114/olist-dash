@@ -12,15 +12,17 @@
 // /notas/{id}/lancar-contas (uma única vez) e baixa na sequência.
 // Estado em mp_releases (idempotente).
 
-import { getMlAccessToken } from "@/lib/ml-api"
-import { fetchMlOrderRelease } from "@/lib/mp-release"
+import { fetchShipmentLogisticType, getMlAccessToken } from "@/lib/ml-api"
+import { fetchMlOrderRelease, type MlOrderRelease } from "@/lib/mp-release"
 import { planBaixa } from "@/lib/mp-baixa-plan"
 import {
   baixarContaReceber,
   extractOcNumber,
+  fetchNotaSituacao,
   fetchReceivablesByEmissionRange,
   fetchReceivablesByNota,
   lancarContasNota,
+  NOTA_SITUACOES_AUTORIZADAS,
   refreshAccessToken,
   toNumber,
   type TinyReceivable,
@@ -69,7 +71,12 @@ export type MpReconcileSummary = {
   errors: number
   completed: boolean
   planned: BaixaPlanejada[]
-  // Pedidos Full sem conta cuja NF teria as contas lançadas (dry-run não lança).
+  // Totais reais antes do corte de exibição (planned/notasALancar mostram até 100).
+  plannedTotal: number
+  notasALancarTotal: number
+  // Pedidos Full APTOS a lancar-contas (gate comprovado: fulfillment + NF
+  // autorizada) que não foram lançados nesta execução (dry-run, sem ?full=1
+  // ou teto atingido).
   notasALancar: Array<{ olistId: string; mlOrderId: string; idNotaFiscal: number }>
   stats: { total: number; released: number; baixados: number; pendentes: number }
   elapsedMs: number
@@ -82,10 +89,38 @@ export type MpReconcileSummary = {
 const MP_CONTA_DESTINO_ID = 348321811 // conta financeira "Mercado Pago"
 const ML_VENDAS_CATEGORIA_ID = 350314766 // categoria "VENDAS MERCADO LIVRE"
 
-export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } = {}): Promise<MpReconcileSummary> {
+// Teto de lancar-contas por execução, mesmo com ?full=1: lote controlado.
+const MAX_NOTAS_LANCADAS_POR_RUN = 20
+
+// Gate do lançamento de contas para pedido Full (revisão 22/08, P0): só lança
+// com comprovação de que o envio é fulfillment no ML E de que a NF está
+// autorizada (situação 6/7). Qualquer dúvida = não lança (fail-closed).
+async function verifyFullGate(
+  release: MlOrderRelease,
+  idNota: number,
+  mlToken: string,
+  olistToken: string,
+): Promise<{ ok: true } | { ok: false; motivo: string }> {
+  const shipmentId = release.shipmentIds?.[0]
+  if (!shipmentId) return { ok: false, motivo: "pedido sem shipment no ML — não comprova Full" }
+  const logistic = await fetchShipmentLogisticType(shipmentId, mlToken)
+  if (logistic !== "fulfillment") {
+    return { ok: false, motivo: `envio ${logistic ?? "ilegível"} não é fulfillment — não é Full` }
+  }
+  const situacao = await fetchNotaSituacao(olistToken, idNota)
+  if (situacao === null || !NOTA_SITUACOES_AUTORIZADAS.has(situacao)) {
+    return { ok: false, motivo: `NF ${idNota} em situação ${situacao ?? "ilegível"} — não autorizada` }
+  }
+  return { ok: true }
+}
+
+export async function runMpReconcile(
+  opts: { dryRun?: boolean; days?: number; enableFullLancamento?: boolean } = {},
+): Promise<MpReconcileSummary> {
   const startedAt = Date.now()
   const deadline = startedAt + BUDGET_MS
   const dryRun = opts.dryRun ?? false
+  const enableFullLancamento = opts.enableFullLancamento ?? false
   const days = opts.days && opts.days > 0 ? opts.days : DEFAULT_DAYS
 
   const windowStart = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
@@ -145,6 +180,10 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
         amount: release.amount,
         netAmount: release.netAmount,
         feeAmount: release.feeAmount,
+        // charges_details por pagamento, preservado para auditoria da tarifa.
+        charges: release.payments.some((p) => p.charges.length)
+          ? release.payments.map((p) => ({ paymentId: p.paymentId, charges: p.charges }))
+          : null,
       }
 
       if (release.releaseStatus !== "released") {
@@ -163,17 +202,35 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
         contas = await fetchReceivablesByNota(olistToken, idNota)
       }
 
-      // Pedidos Full: a integração ML→Olist não gera o financeiro. Com NF e
-      // NENHUMA conta em qualquer situação, lança as contas da nota (uma única
-      // vez por pedido) e baixa na sequência. Em dry-run apenas reporta.
-      let contasLancadasAt: Date | null = null
+      // Pedidos Full: a integração ML→Olist não gera o financeiro. Com NF,
+      // NENHUMA conta em qualquer situação e o gate comprovado (envio
+      // fulfillment no ML + NF autorizada), lança as contas da nota — uma
+      // única vez por pedido, carimbando ANTES do POST (write-ahead: se o
+      // processo cair entre o POST e a persistência, nunca relançamos; um
+      // carimbo órfão vira pendência manual, nunca conta duplicada).
+      // Só executa com a flag explícita (?full=1) e dentro do teto por run;
+      // caso contrário os aptos são apenas reportados em notasALancar.
+      let fullGateMotivo: string | null = null
       if (!contas.length && idNota && !candidate.contasLancadasAt) {
-        if (dryRun) {
+        const gate = await verifyFullGate(release, idNota, mlToken, olistToken)
+        if (!gate.ok) {
+          fullGateMotivo = gate.motivo
+        } else if (dryRun || !enableFullLancamento) {
           notasALancar.push({ olistId: candidate.olistId, mlOrderId: candidate.mlOrderId, idNotaFiscal: idNota })
+          fullGateMotivo = dryRun ? "apto a lancar-contas (dry-run)" : "apto a lancar-contas (aguardando ?full=1)"
+        } else if (notasLancadas >= MAX_NOTAS_LANCADAS_POR_RUN) {
+          notasALancar.push({ olistId: candidate.olistId, mlOrderId: candidate.mlOrderId, idNotaFiscal: idNota })
+          fullGateMotivo = `apto, mas teto de ${MAX_NOTAS_LANCADAS_POR_RUN} lançamentos por execução atingido`
         } else {
+          // Write-ahead: carimbo persistido ANTES da mutação.
+          await upsertMpRelease({
+            ...base,
+            baixaStatus: "receivable_not_found",
+            contasLancadasAt: new Date(),
+            lastError: `lancar-contas da NF ${idNota}: em execução`,
+          })
           try {
             await lancarContasNota(olistToken, idNota)
-            contasLancadasAt = new Date()
             notasLancadas += 1
             contas = await fetchReceivablesByNota(olistToken, idNota)
           } catch (err) {
@@ -182,7 +239,7 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
             await upsertMpRelease({
               ...base,
               baixaStatus: "receivable_not_found",
-              lastError: `lancar-contas da NF ${idNota} falhou: ${message}`,
+              lastError: `lancar-contas da NF ${idNota} falhou após carimbo (verificar manualmente antes de relançar): ${message}`,
             })
             await delay(INTERVALO_MS)
             continue
@@ -194,7 +251,7 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
 
       if (decision.action === "already_paid") {
         alreadyPaid += 1
-        await upsertMpRelease({ ...base, receivableId: decision.receivableId, baixaStatus: "already_paid", contasLancadasAt })
+        await upsertMpRelease({ ...base, receivableId: decision.receivableId, baixaStatus: "already_paid" })
         await delay(INTERVALO_MS)
         continue
       }
@@ -204,8 +261,9 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
         await upsertMpRelease({
           ...base,
           baixaStatus: "receivable_not_found",
-          contasLancadasAt,
-          lastError: contas.length ? `contas em situação: ${contas.map((c) => c.situacao).join(", ")}` : null,
+          lastError:
+            fullGateMotivo ??
+            (contas.length ? `contas em situação: ${contas.map((c) => c.situacao).join(", ")}` : null),
         })
         await delay(INTERVALO_MS)
         continue
@@ -216,7 +274,6 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
         await upsertMpRelease({
           ...base,
           baixaStatus: "divergence",
-          contasLancadasAt,
           lastError: `${decision.reason}: ${decision.detail}`,
         })
         await delay(INTERVALO_MS)
@@ -267,7 +324,6 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
           baixaStatus: "done",
           baixaScheme: "net_fee",
           baixaAt: new Date(),
-          contasLancadasAt,
         })
       } catch (err) {
         errors += 1
@@ -276,7 +332,6 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
           ...base,
           receivableId: decision.receivableId,
           baixaStatus: "error",
-          contasLancadasAt,
           lastError: message,
         })
       }
@@ -300,6 +355,8 @@ export async function runMpReconcile(opts: { dryRun?: boolean; days?: number } =
     errors,
     completed,
     planned: planned.slice(0, 100),
+    plannedTotal: planned.length,
+    notasALancarTotal: notasALancar.length,
     notasALancar: notasALancar.slice(0, 100),
     stats: await getMpReleaseStats(sinceDate),
     elapsedMs: Date.now() - startedAt,

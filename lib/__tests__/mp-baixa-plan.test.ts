@@ -80,6 +80,14 @@ describe("planBaixa", () => {
     })
   })
 
+  it("conta aberta ao lado de outra já PAGA: divergência de duplicidade", () => {
+    // Cenário da revisão (P1): o título pode já ter sido pago em duplicata.
+    // Baixar a aberta receberia o mesmo dinheiro duas vezes — trava manual.
+    const decision = planBaixa(release(), [conta(), conta({ id: 999, situacao: "pago", saldo: 0 })])
+    expect(decision.action).toBe("divergence")
+    expect(decision).toMatchObject({ reason: "duplicate_receivables" })
+  })
+
   it("mais de uma conta aberta: divergência (exigimos exatamente uma)", () => {
     const decision = planBaixa(release(), [conta(), conta({ id: 999 })])
     expect(decision.action).toBe("divergence")

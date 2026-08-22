@@ -81,6 +81,8 @@ export const mpReleases = pgTable(
     // Detalhamento financeiro do MP (net_received_amount; tarifa = bruto − líquido).
     netAmount: numeric("net_amount", { precision: 14, scale: 2 }),
     feeAmount: numeric("fee_amount", { precision: 14, scale: 2 }),
+    // charges_details do MP por pagamento, preservado para auditoria.
+    charges: jsonb("charges"),
     receivableId: integer("receivable_id"),
     baixaStatus: text("baixa_status").notNull().default("pending"), // pending | done | already_paid | receivable_not_found | divergence | error
     // 'gross' = legado (baixa pelo bruto, sem tarifa); 'net_fee' = esquema atual

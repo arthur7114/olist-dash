@@ -9,6 +9,9 @@ export const maxDuration = 300
 // Concilia a liberação do Mercado Pago com o contas a receber da Olist: pedidos
 // ML com dinheiro liberado (money_release) ganham baixa automática no ERP.
 // Resumível: rode até completed=true. `?dryRun=1` só relata o que seria baixado.
+// `?full=1` habilita o lançamento de contas de NF para pedidos Full (mutação
+// extra na Olist) — DESLIGADO por padrão: o cron faz só as baixas comuns e os
+// Full aptos aparecem em `notasALancar` para lote controlado.
 export async function POST(request: Request) {
   return handle(request)
 }
@@ -33,9 +36,10 @@ async function handle(request: Request) {
 
   const dryRun = url.searchParams.get("dryRun") === "1"
   const days = Number(url.searchParams.get("days")) || undefined
+  const enableFullLancamento = url.searchParams.get("full") === "1"
 
   try {
-    const summary = await runMpReconcile({ dryRun, days })
+    const summary = await runMpReconcile({ dryRun, days, enableFullLancamento })
     return NextResponse.json(summary)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

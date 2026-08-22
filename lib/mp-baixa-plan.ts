@@ -14,6 +14,7 @@ import { isReceivableOpen, toNumber, type TinyReceivable } from "@/lib/olist-v3"
 export type DivergenceReason =
   | "refund_present"
   | "multiple_open_receivables"
+  | "duplicate_receivables"
   | "gross_mismatch"
   | "partial_balance"
   | "invalid_net"
@@ -42,10 +43,21 @@ export function planBaixa(release: MlOrderRelease, contas: TinyReceivable[]): Ba
   }
 
   const abertas = contas.filter(isReceivableOpen)
+  const pagas = contas.filter((c) => c.situacao === "pago")
+
   if (!abertas.length) {
-    const paga = contas.find((c) => c.situacao === "pago")
-    if (paga) return { action: "already_paid", receivableId: paga.id ?? null }
+    if (pagas.length) return { action: "already_paid", receivableId: pagas[0].id ?? null }
     return { action: "receivable_not_found" }
+  }
+
+  // Conta aberta convivendo com outra JÁ PAGA do mesmo pedido: provável título
+  // duplicado — baixar a aberta receberia o mesmo dinheiro duas vezes.
+  if (pagas.length) {
+    return {
+      action: "divergence",
+      reason: "duplicate_receivables",
+      detail: `conta aberta ${abertas.map((c) => c.id ?? "?").join(", ")} convive com paga ${pagas.map((c) => c.id ?? "?").join(", ")} — possível duplicidade, resolver manualmente`,
+    }
   }
 
   if (abertas.length > 1) {

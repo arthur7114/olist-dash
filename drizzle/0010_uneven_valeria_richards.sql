@@ -1,0 +1,1 @@
+ALTER TABLE "mp_releases" ADD COLUMN "charges" jsonb;

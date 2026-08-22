@@ -106,6 +106,24 @@ export async function resolveMlOrders(
   return { orders: validOrders, packShipmentId: pack.shipment?.id }
 }
 
+// Tipo logístico do envio: "fulfillment" = Full (estoque no ML). Usado como
+// comprovação de Full antes de lançar contas da NF — a integração ML→Olist não
+// gera o financeiro desses pedidos. null quando o envio não é legível: quem
+// chama NÃO deve tratar como Full.
+export async function fetchShipmentLogisticType(
+  shipmentId: number,
+  accessToken: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<string | null> {
+  const res = await fetchFn(`${ML_API_URL}/shipments/${shipmentId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  })
+  if (!res.ok) return null
+  const shipment = (await res.json()) as { logistic_type?: string }
+  return shipment.logistic_type ?? null
+}
+
 export async function fetchMlOrderCost(
   mlOrderId: string,
   accessToken: string,
