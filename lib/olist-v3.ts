@@ -133,23 +133,38 @@ type TinyProductDetail = {
 export type TinyNotaListItem = {
   id?: number
   valor?: number
+  dataEmissao?: string
   situacao?: number | string
 }
 
 const SITUACAO_NOTA_CANCELADA = 3
 
-// Indexa id-da-nota → valor, para casar com order.idNotaFiscal. Ignora entradas
-// inválidas e notas canceladas (situacao 3) — uma NF cancelada não deve contar
-// como faturamento.
-export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> {
-  const map = new Map<number, number>()
+// Indexa os fatos fiscais por id. Cancelamentos confirmados são preservados como
+// evento explícito para que o banco possa remover uma NF anteriormente autorizada.
+export type NotaFiscalFacts = { valor: number; dataEmissao?: string; cancelada?: boolean }
+
+export function indexNotaFacts(notas: TinyNotaListItem[]): Map<number, NotaFiscalFacts> {
+  const map = new Map<number, NotaFiscalFacts>()
   for (const nota of notas) {
     if (nota.id == null) continue
-    if (Number(nota.situacao) === SITUACAO_NOTA_CANCELADA) continue
+    if (Number(nota.situacao) === SITUACAO_NOTA_CANCELADA) {
+      map.set(nota.id, { valor: 0, cancelada: true })
+      continue
+    }
     const valor = toNumber(nota.valor)
-    if (valor > 0) map.set(nota.id, valor)
+    if (valor <= 0) continue
+    const dataEmissao = nota.dataEmissao?.slice(0, 10)
+    map.set(nota.id, { valor, ...(dataEmissao ? { dataEmissao } : {}) })
   }
   return map
+}
+
+export function indexNotaValues(notas: TinyNotaListItem[]): Map<number, number> {
+  return new Map(
+    Array.from(indexNotaFacts(notas))
+      .filter(([, facts]) => !facts.cancelada && facts.valor > 0)
+      .map(([id, facts]) => [id, facts.valor]),
+  )
 }
 
 type TinyProductListItem = TinyProductDetail & {
@@ -278,7 +293,7 @@ async function tokenRequest(params: Record<string, string>) {
   return (await response.json()) as TinyTokenResponse
 }
 
-type CacheEntry<T> = { value: T; expiresAt: number }
+type CacheEntry<T> = { value: T; expiresAt: number; dirty: boolean }
 
 // ---------------------------------------------------------------------------
 // Sync para o banco: carrega pedidos de uma janela de datas, com detalhe completo.
@@ -288,6 +303,7 @@ type CacheEntry<T> = { value: T; expiresAt: number }
 export type SyncOrder = {
   pedido: Pedido
   situacao?: number
+  notaCancelada?: boolean
   detailLevel: "full" | "summary"
   raw: TinyOrderDetail
   itens: SyncOrderItem[]
@@ -315,10 +331,10 @@ export async function syncOrdersIncremental(
   const maxItems = opts.maxItems ?? 5000
   const batchSize = opts.batchSize ?? 25
   const items = await fetchOrderListRange(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
-  const notaValues =
+  const notaFacts =
     items.length === 0
-      ? new Map<number, number>()
-      : await fetchNotaValuesRangeSafe(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
+      ? new Map<number, NotaFiscalFacts>()
+      : await fetchNotaFactsRangeSafe(accessToken, opts.dataInicial, opts.dataFinal, maxItems)
 
   let processed = 0
   let completed = true
@@ -327,18 +343,27 @@ export async function syncOrdersIncremental(
   const flush = async () => {
     if (!batch.length) return
     const productCosts = await fetchProductCosts(accessToken, batch)
+    await fetchNotaFactsByIds(
+      accessToken,
+      batch.flatMap((detail) => (detail.idNotaFiscal == null ? [] : [detail.idNotaFiscal])),
+      notaFacts,
+    )
     const noPayments = new Map<string, string>()
     const custoDe = (id?: number, sku?: string) =>
       (id !== undefined ? productCosts.byId.get(id) : undefined) ??
       (sku ? productCosts.bySku.get(sku) : undefined) ??
       0
-    const mapped: SyncOrder[] = batch.map((detail) => ({
-      pedido: mapOrderToPedido(detail, productCosts, noPayments, notaValues),
-      situacao: detail.situacao,
-      detailLevel: "full",
-      raw: detail,
-      itens: extractOrderItems(detail, custoDe),
-    }))
+    const mapped: SyncOrder[] = batch.map((detail) => {
+      const nota = detail.idNotaFiscal == null ? undefined : notaFacts.get(detail.idNotaFiscal)
+      return {
+        pedido: mapOrderToPedido(detail, productCosts, noPayments, notaFacts),
+        situacao: detail.situacao,
+        notaCancelada: nota?.cancelada,
+        detailLevel: "full",
+        raw: detail,
+        itens: extractOrderItems(detail, custoDe),
+      }
+    })
     await opts.onBatch(mapped)
     processed += mapped.length
     batch = []
@@ -378,28 +403,58 @@ export async function recomputeCostsForRaws(
   const details = raws as TinyOrderDetail[]
   const productCosts = await fetchProductCosts(accessToken, details)
   const noPayments = new Map<string, string>()
-  const noNotaValues = new Map<number, number>()
+  const noNotaFacts = new Map<number, NotaFiscalFacts>()
   return details.map((detail) => {
-    const pedido = mapOrderToPedido(detail, productCosts, noPayments, noNotaValues)
+    const pedido = mapOrderToPedido(detail, productCosts, noPayments, noNotaFacts)
     return { custoTotal: pedido.custoTotal, quantidade: pedido.quantidade }
   })
 }
 
 // Ponte entre o cache de custo em memória e a tabela product_costs (persiste entre
 // cold starts do serverless): o sync semeia antes de rodar e exporta os custos depois.
-export function primeProductCostCache(entries: Array<{ ref: string; custo: number }>) {
-  const expiresAt = Date.now() + PRODUCT_COST_TTL_MS
-  for (const { ref, custo } of entries) {
-    if (ref.startsWith("id:")) productCostById.set(Number(ref.slice(3)), { value: custo, expiresAt })
-    else if (ref.startsWith("sku:")) productCostBySku.set(ref.slice(4), { value: custo, expiresAt })
+export function primeProductCostCache(
+  entries: Array<{ ref: string; custo: number; updatedAt: Date | string }>,
+) {
+  const now = Date.now()
+  for (const { ref, custo, updatedAt } of entries) {
+    const fetchedAt = new Date(updatedAt).getTime()
+    const expiresAt = fetchedAt + PRODUCT_COST_TTL_MS
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) continue
+    const entry = { value: custo, expiresAt, dirty: false }
+    if (ref.startsWith("id:")) {
+      const id = Number(ref.slice(3))
+      const current = productCostById.get(id)
+      if (!current || current.expiresAt < expiresAt) productCostById.set(id, entry)
+    } else if (ref.startsWith("sku:")) {
+      const sku = ref.slice(4)
+      const current = productCostBySku.get(sku)
+      if (!current || current.expiresAt < expiresAt) productCostBySku.set(sku, entry)
+    }
   }
 }
 
 export function exportProductCostCache(): Array<{ ref: string; custo: number }> {
   const out: Array<{ ref: string; custo: number }> = []
-  for (const [id, entry] of productCostById) out.push({ ref: `id:${id}`, custo: entry.value })
-  for (const [sku, entry] of productCostBySku) out.push({ ref: `sku:${sku}`, custo: entry.value })
+  for (const [id, entry] of productCostById) {
+    if (!entry.dirty) continue
+    out.push({ ref: `id:${id}`, custo: entry.value })
+  }
+  for (const [sku, entry] of productCostBySku) {
+    if (!entry.dirty) continue
+    out.push({ ref: `sku:${sku}`, custo: entry.value })
+  }
   return out
+}
+
+export function markProductCostsPersisted(entries: Array<{ ref: string; custo: number }>): void {
+  for (const { ref, custo } of entries) {
+    const entry = ref.startsWith("id:")
+      ? productCostById.get(Number(ref.slice(3)))
+      : ref.startsWith("sku:")
+        ? productCostBySku.get(ref.slice(4))
+        : undefined
+    if (entry?.dirty && entry.value === custo) entry.dirty = false
+  }
 }
 
 async function fetchOrderListRange(
@@ -441,14 +496,14 @@ async function fetchOrderListRange(
   return items.slice(0, maxItems)
 }
 
-// Busca o valor das notas fiscais criadas numa janela de datas e devolve id-da-nota → valor.
+// Busca os dados das notas fiscais criadas numa janela de datas.
 // Paginação no mesmo molde de fetchOrderListRange. Não lança em 429 se já houver dados.
-export async function fetchNotaValuesRange(
+export async function fetchNotaFactsRange(
   accessToken: string,
   dataInicial: string,
   dataFinal: string,
   maxItems: number,
-): Promise<Map<number, number>> {
+): Promise<Map<number, NotaFiscalFacts>> {
   const notas: TinyNotaListItem[] = []
   const limit = 100
   let offset = 0
@@ -479,7 +534,41 @@ export async function fetchNotaValuesRange(
     offset += limit
   }
 
-  return indexNotaValues(notas.slice(0, maxItems))
+  return indexNotaFacts(notas.slice(0, maxItems))
+}
+
+export async function fetchNotaValuesRange(
+  accessToken: string,
+  dataInicial: string,
+  dataFinal: string,
+  maxItems: number,
+): Promise<Map<number, number>> {
+  const facts = await fetchNotaFactsRange(accessToken, dataInicial, dataFinal, maxItems)
+  return new Map(
+    Array.from(facts)
+      .filter(([, nota]) => !nota.cancelada && nota.valor > 0)
+      .map(([id, nota]) => [id, nota.valor]),
+  )
+}
+
+// Complementa a listagem por período consultando diretamente notas que foram emitidas
+// depois da data do pedido. Isso é essencial para pedidos reservados/faturados dias depois.
+export async function fetchNotaFactsByIds(
+  accessToken: string,
+  ids: number[],
+  facts: Map<number, NotaFiscalFacts> = new Map(),
+): Promise<Map<number, NotaFiscalFacts>> {
+  const missing = Array.from(new Set(ids)).filter((id) => !facts.has(id))
+  await mapWithConcurrency(missing, 3, async (id) => {
+    try {
+      const nota = await tinyFetch<TinyNotaListItem>(accessToken, `/notas/${id}`)
+      const fact = indexNotaFacts([{ ...nota, id }]).get(id)
+      if (fact) facts.set(id, fact)
+    } catch {
+      // Mantém o sync resiliente; o backfill tenta novamente em outra execução.
+    }
+  })
+  return facts
 }
 
 // Wrapper não-fatal para o sync principal: mesmo com o schema do /notas confirmado
@@ -487,20 +576,20 @@ export async function fetchNotaValuesRange(
 // rede — isso aqui NÃO pode derrubar o sync de pedidos. O valor da NF fica ausente
 // nesta execução e é recuperável depois via o backfill (que tem seu próprio
 // tratamento de erro independente).
-async function fetchNotaValuesRangeSafe(
+async function fetchNotaFactsRangeSafe(
   accessToken: string,
   dataInicial: string,
   dataFinal: string,
   maxItems: number,
-): Promise<Map<number, number>> {
+): Promise<Map<number, NotaFiscalFacts>> {
   try {
-    return await fetchNotaValuesRange(accessToken, dataInicial, dataFinal, maxItems)
+    return await fetchNotaFactsRange(accessToken, dataInicial, dataFinal, maxItems)
   } catch (err) {
     console.warn(
-      "[olist-v3] fetchNotaValuesRange falhou; sync de pedidos continua sem valorNota nesta execução:",
+      "[olist-v3] fetchNotaFactsRange falhou; sync de pedidos continua sem valorNota nesta execução:",
       err,
     )
-    return new Map<number, number>()
+    return new Map<number, NotaFiscalFacts>()
   }
 }
 
@@ -628,7 +717,7 @@ function mapOrderToPedido(
   order: TinyOrderDetail,
   productCosts: ProductCostLookup,
   receivablePayments: Map<string, string>,
-  notaValues: Map<number, number>,
+  notaFacts: Map<number, NotaFiscalFacts>,
 ): Pedido {
   const itens = order.itens?.length ? order.itens : itemToMinimalDetail(order).itens ?? []
   const totalItens = itens.reduce(
@@ -650,6 +739,7 @@ function mapOrderToPedido(
   const devolucao = order.situacao === 2 ? valorVenda : 0
   const quantidade = itens.reduce((sum, item) => sum + Math.max(1, toNumber(item.quantidade)), 0)
   const sufixoProduto = itens.length > 1 ? ` + ${itens.length - 1} item(ns)` : ""
+  const nota = order.idNotaFiscal == null ? undefined : notaFacts.get(order.idNotaFiscal)
 
   return {
     id: pedidoId,
@@ -667,10 +757,8 @@ function mapOrderToPedido(
     // aplica a estimativa por canal em tempo de leitura — ver taxaComissaoEfetiva).
     taxaComissao: roundMoney(getOlistFee(order)),
     custoTotal: roundMoney(custoTotal),
-    valorNota:
-      order.idNotaFiscal != null && notaValues.has(order.idNotaFiscal)
-        ? roundMoney(notaValues.get(order.idNotaFiscal)!)
-        : undefined,
+    valorNota: nota && !nota.cancelada ? roundMoney(nota.valor) : undefined,
+    dataNota: nota && !nota.cancelada ? nota.dataEmissao : undefined,
     quantidade: Math.max(1, quantidade),
     statusPagamento: getStatusPagamento(order),
     data: normalizeDate(order.data ?? order.dataCriacao ?? order.dataFaturamento),
@@ -700,7 +788,7 @@ function readCostCache<K>(map: Map<K, CacheEntry<number>>, key: K): number | und
 }
 
 function writeCostCache<K>(map: Map<K, CacheEntry<number>>, key: K, value: number): void {
-  map.set(key, { value, expiresAt: Date.now() + PRODUCT_COST_TTL_MS })
+  map.set(key, { value, expiresAt: Date.now() + PRODUCT_COST_TTL_MS, dirty: true })
 }
 
 async function fetchProductCosts(

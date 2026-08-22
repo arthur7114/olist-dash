@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { indexNotaValues } from "@/lib/olist-v3"
+import { indexNotaFacts, indexNotaValues } from "@/lib/olist-v3"
 
 describe("indexNotaValues", () => {
   it("mapeia id da nota para o valor", () => {
@@ -23,5 +23,18 @@ describe("indexNotaValues", () => {
     ])
     expect(m.has(15)).toBe(false)
     expect(m.get(16)).toBe(300)
+
+    const facts = indexNotaFacts([{ id: 15, valor: 200, situacao: 3 }])
+    expect(facts.get(15)).toEqual({ valor: 0, cancelada: true })
+  })
+})
+
+describe("indexNotaFacts", () => {
+  it("preserva valor e data de emissão da nota", () => {
+    const facts = indexNotaFacts([
+      { id: 20, valor: 24_667.5, dataEmissao: "2026-08-20 16:44:07", situacao: 6 },
+    ])
+
+    expect(facts.get(20)).toEqual({ valor: 24_667.5, dataEmissao: "2026-08-20" })
   })
 })

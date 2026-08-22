@@ -43,6 +43,7 @@ export interface Pedido {
   taxaComissao: number // taxa/comissão em R$ aplicada (ML, vendedores); 0 = não capturado da Olist
   custoTotal: number // custo dos produtos vendidos
   valorNota?: number // valor da NF emitida (R$); undefined = sem NF / não capturado
+  dataNota?: string // data de emissão da NF (ISO); undefined = sem NF / não capturada
   quantidade: number // qtd total de itens do pedido
   statusPagamento: StatusPagamento
   data: string // ISO date
@@ -502,6 +503,6 @@ export type BaseValor = "venda" | "nota"
 export function aplicarBaseValor(pedidos: Pedido[], base: BaseValor): Pedido[] {
   if (base === "venda") return pedidos
   return pedidos
-    .filter((p) => p.valorNota != null)
-    .map((p) => ({ ...p, valorVenda: p.valorNota as number }))
+    .filter((p) => p.valorNota != null && Boolean(p.dataNota))
+    .map((p) => ({ ...p, valorVenda: p.valorNota as number, data: p.dataNota as string }))
 }

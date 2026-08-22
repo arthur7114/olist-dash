@@ -70,3 +70,26 @@ export async function getItemsByPeriod(dataInicial: string): Promise<Map<string,
   }
   return mapa
 }
+
+export async function getItemsByOrderIds(olistIds: string[]): Promise<Map<string, ItemPedido[]>> {
+  if (!olistIds.length) return new Map()
+  const db = getDb()
+  const rows = []
+  const CHUNK = 500
+  for (let i = 0; i < olistIds.length; i += CHUNK) {
+    rows.push(...(await db.select().from(orderItems).where(inArray(orderItems.olistId, olistIds.slice(i, i + CHUNK)))))
+  }
+  const mapa = new Map<string, ItemPedido[]>()
+  for (const r of rows) {
+    const lista = mapa.get(r.olistId) ?? []
+    lista.push({
+      sku: r.sku,
+      descricao: r.descricao,
+      quantidade: r.quantidade,
+      valorUnitario: Number(r.valorUnitario),
+      custoUnitario: Number(r.custoUnitario),
+    })
+    mapa.set(r.olistId, lista)
+  }
+  return mapa
+}

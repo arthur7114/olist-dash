@@ -19,6 +19,7 @@ export const orders = pgTable(
     taxaComissao: numeric("taxa_comissao", { precision: 14, scale: 2 }).notNull().default("0"),
     custoTotal: numeric("custo_total", { precision: 14, scale: 2 }).notNull().default("0"),
     valorNota: numeric("valor_nota", { precision: 14, scale: 2 }),
+    dataNota: date("data_nota"),
     quantidade: integer("quantidade").notNull().default(1),
     data: date("data").notNull(),
     situacao: integer("situacao"),
@@ -28,6 +29,7 @@ export const orders = pgTable(
   },
   (t) => ({
     dataIdx: index("orders_data_idx").on(t.data),
+    dataNotaIdx: index("orders_data_nota_idx").on(t.dataNota),
   }),
 )
 

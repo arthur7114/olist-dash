@@ -1,6 +1,7 @@
 import {
   exportProductCostCache,
-  fetchNotaValuesRange,
+  fetchNotaFactsByIds,
+  markProductCostsPersisted,
   primeProductCostCache,
   recomputeCostsForRaws,
   refreshAccessToken,
@@ -10,11 +11,12 @@ import {
 import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
 import { saveSyncState } from "@/lib/db/syncState"
 import {
+  clearOrderNotaFacts,
   getBackfillSkipIds,
   getOrdersMissingCost,
   getOrdersMissingNotaValue,
   updateOrderCost,
-  updateOrderNotaValue,
+  updateOrderNotaFacts,
   upsertOrders,
 } from "@/lib/db/orders"
 import { getAllProductCosts, saveProductCosts } from "@/lib/db/productCosts"
@@ -46,6 +48,12 @@ function addDays(base: Date, n: number): Date {
   const x = new Date(base)
   x.setUTCDate(x.getUTCDate() + n)
   return x
+}
+
+async function persistProductCostCache(): Promise<void> {
+  const entries = exportProductCostCache()
+  await saveProductCosts(entries)
+  markProductCostsPersisted(entries)
 }
 
 export async function runSync(opts: { full?: boolean } = {}): Promise<SyncSummary> {
@@ -98,7 +106,7 @@ export async function runSync(opts: { full?: boolean } = {}): Promise<SyncSummar
   }
 
   // Persiste custos descobertos + estado (best-effort; os pedidos já foram gravados em lotes).
-  await saveProductCosts(exportProductCostCache())
+  await persistProductCostCache()
   await saveSyncState({
     cursorData: backfillDone ? target : recentStart,
     lastRunAt: new Date(),
@@ -169,7 +177,7 @@ export async function runRecomputeCosts(): Promise<RecomputeSummary> {
   }
 
   // Persiste custos recém-descobertos para acelerar as próximas execuções.
-  await saveProductCosts(exportProductCostCache())
+  await persistProductCostCache()
 
   return {
     ok: true,
@@ -215,14 +223,20 @@ export async function runBackfillNotas(): Promise<{
       break
     }
     const slice = all.slice(i, i + CHUNK)
-    const datas = slice.map((o) => o.data).sort()
-    const notaValues = await fetchNotaValuesRange(accessToken, datas[0], datas[datas.length - 1], 5000)
+    const idsNota = slice.flatMap((o) => {
+      const idNota = (o.raw as TinyOrderDetail)?.idNotaFiscal
+      return idNota == null ? [] : [idNota]
+    })
+    const notaFacts = await fetchNotaFactsByIds(accessToken, idsNota)
     for (const o of slice) {
       scanned += 1
       const idNota = (o.raw as TinyOrderDetail)?.idNotaFiscal
-      const valor = idNota != null ? notaValues.get(idNota) : undefined
-      if (valor && valor > 0) {
-        await updateOrderNotaValue(o.olistId, valor)
+      const nota = idNota != null ? notaFacts.get(idNota) : undefined
+      if (nota?.cancelada) {
+        await clearOrderNotaFacts(o.olistId)
+        updated += 1
+      } else if (nota && nota.valor > 0 && nota.dataEmissao) {
+        await updateOrderNotaFacts(o.olistId, nota.valor, nota.dataEmissao)
         updated += 1
       }
     }

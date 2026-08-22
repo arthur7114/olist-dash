@@ -2,10 +2,10 @@ import { sql } from "drizzle-orm"
 import { getDb } from "./client"
 import { productCosts } from "./schema"
 
-export async function getAllProductCosts(): Promise<Array<{ ref: string; custo: number }>> {
+export async function getAllProductCosts(): Promise<Array<{ ref: string; custo: number; updatedAt: Date }>> {
   const db = getDb()
   const rows = await db.select().from(productCosts)
-  return rows.map((r) => ({ ref: r.ref, custo: Number(r.custo) }))
+  return rows.map((r) => ({ ref: r.ref, custo: Number(r.custo), updatedAt: r.updatedAt }))
 }
 
 export async function saveProductCosts(entries: Array<{ ref: string; custo: number }>): Promise<void> {

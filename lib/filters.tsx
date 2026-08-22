@@ -96,6 +96,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
       setCarregando(true)
       try {
         const params = new URLSearchParams({ periodo: filtros.periodo })
+        params.set("base", baseValor)
         if (filtros.periodo === "custom" && filtros.customInicio && filtros.customFim) {
           params.set("de", filtros.customInicio)
           params.set("ate", filtros.customFim)
@@ -131,7 +132,7 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
     return () => {
       ativo = false
     }
-  }, [filtros.periodo, filtros.customInicio, filtros.customFim, customIncompleto])
+  }, [filtros.periodo, filtros.customInicio, filtros.customFim, customIncompleto, baseValor])
 
   const setFiltro = <K extends keyof FiltrosState>(chave: K, valor: FiltrosState[K]) => {
     setFiltros((prev) => {
@@ -152,12 +153,14 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
 
   const limpar = () => setFiltros(padrao)
 
-  // Referência = maior data do dataset (funciona p/ mock congelado e p/ dados reais).
+  const pedidosNaBase = useMemo(() => aplicarBaseValor(pedidos, baseValor), [pedidos, baseValor])
+
+  // Referência = maior data da base escolhida (venda ou emissão da NF).
   const referencia = useMemo(() => {
     let max = ""
-    for (const p of pedidos) if (p.data > max) max = p.data
+    for (const p of pedidosNaBase) if (p.data > max) max = p.data
     return max ? new Date(max + "T00:00:00Z") : new Date()
-  }, [pedidos])
+  }, [pedidosNaBase])
 
   const range = useMemo(() => {
     if (filtros.periodo === "custom" && filtros.customInicio && filtros.customFim) {
@@ -178,27 +181,21 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
 
   const pedidosFiltrados = useMemo(
     () =>
-      aplicarBaseValor(
-        pedidos.filter((p) => {
-          if (range.inicio && p.data < range.inicio) return false
-          if (range.fim && p.data > range.fim) return false
-          return passaDimensoes(p)
-        }),
-        baseValor,
-      ),
-    [pedidos, range, passaDimensoes, baseValor],
+      pedidosNaBase.filter((p) => {
+        if (range.inicio && p.data < range.inicio) return false
+        if (range.fim && p.data > range.fim) return false
+        return passaDimensoes(p)
+      }),
+    [pedidosNaBase, range, passaDimensoes],
   )
 
   // Mesmos filtros dimensionais na janela anterior — base do "vs. período anterior".
   const pedidosPeriodoAnterior = useMemo(() => {
     if (!range.inicioAnterior || !range.fimAnterior) return []
-    return aplicarBaseValor(
-      pedidos.filter(
-        (p) => p.data >= range.inicioAnterior! && p.data <= range.fimAnterior! && passaDimensoes(p),
-      ),
-      baseValor,
+    return pedidosNaBase.filter(
+      (p) => p.data >= range.inicioAnterior! && p.data <= range.fimAnterior! && passaDimensoes(p),
     )
-  }, [pedidos, range, passaDimensoes, baseValor])
+  }, [pedidosNaBase, range, passaDimensoes])
 
   const opcoes = useMemo(() => {
     const canais = uniqueSorted([...CANAIS, ...pedidos.map((p) => p.canal)])
