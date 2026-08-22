@@ -663,9 +663,10 @@ async function tinyFetch<T>(
     })
 
     if (!response.ok) {
-      // Mutações não são reexecutadas em 5xx: o servidor pode ter aplicado a
-      // escrita antes de falhar a resposta, e repetir duplicaria o efeito.
-      const retryable = response.status === 429 || (!isMutation && response.status >= 500)
+      // Mutações NUNCA são reexecutadas — nem em 429 (revisão 22/08): o gateway
+      // pode ter aplicado a escrita antes de responder, e repetir duplicaria o
+      // recebimento/lançamento no ERP. Leituras seguem com retry em 429/5xx.
+      const retryable = !isMutation && (response.status === 429 || response.status >= 500)
       if (retryable && attempt < maxRetries) {
         await delay(getRetryDelayMs(response, attempt))
         continue
@@ -1100,6 +1101,17 @@ export async function baixarContaReceber(
     method: "POST",
     body: buildBaixaBody(baixa),
   })
+}
+
+// Situações de NF que comprovam autorização na SEFAZ (doc v3): 6 = Autorizada,
+// 7 = Emitida DANFE. Pendente/emitida/cancelada/rejeitada/denegada ficam fora.
+export const NOTA_SITUACOES_AUTORIZADAS = new Set([6, 7])
+
+// Situação atual de uma nota fiscal (gate do lancar-contas p/ pedidos Full).
+export async function fetchNotaSituacao(accessToken: string, idNota: number): Promise<number | null> {
+  const nota = await tinyFetch<{ situacao?: number | string }>(accessToken, `/notas/${idNota}`)
+  const situacao = Number(nota?.situacao)
+  return Number.isFinite(situacao) ? situacao : null
 }
 
 // Gera as contas (a receber) de uma nota fiscal já autorizada. 204 = sucesso.

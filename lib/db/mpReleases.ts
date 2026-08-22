@@ -2,6 +2,15 @@ import { sql } from "drizzle-orm"
 import { getDb } from "./client"
 import { mpReleases } from "./schema"
 
+// Máquina de estados fechada da baixa (persistida como text no Postgres).
+export type MpBaixaStatus =
+  | "pending"
+  | "done"
+  | "already_paid"
+  | "receivable_not_found"
+  | "divergence"
+  | "error"
+
 export type MpReleaseCandidate = {
   olistId: string
   mlOrderId: string
@@ -67,9 +76,10 @@ export async function upsertMpRelease(row: {
   amount: number
   netAmount?: number | null
   feeAmount?: number | null
+  charges?: unknown
   receivableId?: number | null
-  baixaStatus?: string
-  baixaScheme?: string | null
+  baixaStatus?: MpBaixaStatus
+  baixaScheme?: "gross" | "net_fee" | null
   baixaAt?: Date | null
   contasLancadasAt?: Date | null
   lastError?: string | null
@@ -83,6 +93,7 @@ export async function upsertMpRelease(row: {
     amount: String(row.amount),
     netAmount: row.netAmount != null ? String(row.netAmount) : null,
     feeAmount: row.feeAmount != null ? String(row.feeAmount) : null,
+    charges: row.charges ?? null,
     receivableId: row.receivableId ?? null,
     baixaStatus: row.baixaStatus ?? "pending",
     baixaScheme: row.baixaScheme ?? null,
@@ -104,6 +115,7 @@ export async function upsertMpRelease(row: {
         // Último veredito do MP quando calculado; senão preserva o anterior.
         netAmount: sql`coalesce(excluded.net_amount, mp_releases.net_amount)`,
         feeAmount: sql`coalesce(excluded.fee_amount, mp_releases.fee_amount)`,
+        charges: sql`coalesce(excluded.charges, mp_releases.charges)`,
         receivableId: sql`excluded.receivable_id`,
         baixaStatus: sql`excluded.baixa_status`,
         baixaScheme: sql`coalesce(excluded.baixa_scheme, mp_releases.baixa_scheme)`,

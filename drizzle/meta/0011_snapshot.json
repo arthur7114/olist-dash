@@ -1,6 +1,6 @@
 {
-  "id": "2b1e96a8-aa73-4c0a-9f5b-5dd8a3a13678",
-  "prevId": "383ce466-efe5-4106-a28e-62fbfd0ff53d",
+  "id": "369c35a0-f2dd-4f12-8409-6b1cc8cfaba3",
+  "prevId": "2b1e96a8-aa73-4c0a-9f5b-5dd8a3a13678",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -657,12 +657,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "charges": {
-          "name": "charges",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "receivable_id": {
           "name": "receivable_id",
           "type": "integer",
@@ -706,6 +700,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "charges": {
+          "name": "charges",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1015,6 +1015,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "data_nota": {
+          "name": "data_nota",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
         "quantidade": {
           "name": "quantidade",
           "type": "integer",
@@ -1061,6 +1067,21 @@
           "columns": [
             {
               "expression": "data",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "orders_data_nota_idx": {
+          "name": "orders_data_nota_idx",
+          "columns": [
+            {
+              "expression": "data_nota",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

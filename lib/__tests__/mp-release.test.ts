@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { aggregateRelease, fetchMlOrderRelease, type MpPaymentRelease } from "@/lib/mp-release"
+import { fetchShipmentLogisticType } from "@/lib/ml-api"
 import { extractOcNumber, isReceivableOpen, buildBaixaBody, formatDateBr } from "@/lib/olist-v3"
 import { indexReceivablesByOc } from "@/lib/mp-reconcile"
 
@@ -11,6 +12,7 @@ const payment = (over: Partial<MpPaymentRelease>): MpPaymentRelease => ({
   amount: 100,
   netAmount: 100,
   refundedAmount: 0,
+  charges: [],
   ...over,
 })
 
@@ -63,9 +65,34 @@ describe("aggregateRelease", () => {
     expect(aggregateRelease("123", [payment({ status: "charged_back" })]).releaseStatus).toBe("disputed")
   })
 
-  it("disputa não vence pagamento aprovado e liberado", () => {
+  it("mediação/chargeback em QUALQUER pagamento bloqueia o pack inteiro", () => {
+    // Um pack com um pagamento aprovado e outro em mediação não pode liberar:
+    // o dinheiro da disputa ainda pode ser revertido (revisão 22/08, P1).
     const result = aggregateRelease("123", [
       payment({ paymentId: 1, status: "in_mediation", amount: 10 }),
+      payment({ paymentId: 2, status: "approved", amount: 20 }),
+    ])
+    expect(result.releaseStatus).toBe("disputed")
+
+    expect(
+      aggregateRelease("123", [
+        payment({ paymentId: 1, status: "charged_back", amount: 10 }),
+        payment({ paymentId: 2, status: "approved", amount: 20 }),
+      ]).releaseStatus,
+    ).toBe("disputed")
+  })
+
+  it("pagamento ainda pendente ao lado de aprovado segura o pack em pending", () => {
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, status: "pending", moneyReleaseStatus: null, amount: 10 }),
+      payment({ paymentId: 2, status: "approved", amount: 20 }),
+    ])
+    expect(result.releaseStatus).toBe("pending")
+  })
+
+  it("pagamento rejeitado/cancelado não bloqueia o aprovado", () => {
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, status: "rejected", moneyReleaseStatus: null, amount: 10 }),
       payment({ paymentId: 2, status: "approved", amount: 20 }),
     ])
     expect(result.releaseStatus).toBe("released")
@@ -126,7 +153,12 @@ describe("fetchMlOrderRelease", () => {
       if (url.endsWith("/orders/999")) return jsonResponse({ message: "not found" }, 404)
       if (url.endsWith("/packs/999")) return jsonResponse({ id: 999, orders: [{ id: 111 }] })
       if (url.endsWith("/orders/111"))
-        return jsonResponse({ id: 111, status: "paid", payments: [{ id: 555, status: "approved" }] })
+        return jsonResponse({
+          id: 111,
+          status: "paid",
+          shipping: { id: 777 },
+          payments: [{ id: 555, status: "approved" }],
+        })
       if (url.endsWith("/v1/payments/555"))
         return jsonResponse({
           id: 555,
@@ -136,6 +168,10 @@ describe("fetchMlOrderRelease", () => {
           transaction_amount: 261.61,
           transaction_amount_refunded: 0,
           transaction_details: { net_received_amount: 199.9 },
+          charges_details: [
+            { name: "ml_sale_fee", type: "fee", amounts: { original: 36.37 } },
+            { name: "shp_fulfillment", type: "shipping", amounts: { original: 25.34 } },
+          ],
         })
       throw new Error(`URL inesperada: ${url}`)
     }) as typeof fetch
@@ -148,6 +184,12 @@ describe("fetchMlOrderRelease", () => {
     expect(result.payments).toHaveLength(1)
     expect(result.payments[0].netAmount).toBe(199.9)
     expect(result.payments[0].refundedAmount).toBe(0)
+    // Auditoria: charges preservados por pagamento; shipmentIds p/ checar Full.
+    expect(result.payments[0].charges).toEqual([
+      { name: "ml_sale_fee", type: "fee", amount: 36.37 },
+      { name: "shp_fulfillment", type: "shipping", amount: 25.34 },
+    ])
+    expect(result.shipmentIds).toEqual([777])
     expect(calls.some((u) => u.includes("api.mercadopago.com/v1/payments/555"))).toBe(true)
   })
 
@@ -166,6 +208,25 @@ describe("fetchMlOrderRelease", () => {
     const fetchFn = (async () => new Response("{}", { status: 404 })) as typeof fetch
     const result = await fetchMlOrderRelease("42", "token", fetchFn)
     expect(result.releaseStatus).toBe("not_found")
+  })
+})
+
+describe("fetchShipmentLogisticType", () => {
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+
+  it("lê o logistic_type do envio (fulfillment = Full)", async () => {
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/shipments/777")) return jsonResponse({ id: 777, logistic_type: "fulfillment" })
+      throw new Error(`URL inesperada: ${url}`)
+    }) as typeof fetch
+    expect(await fetchShipmentLogisticType(777, "token", fetchFn)).toBe("fulfillment")
+  })
+
+  it("devolve null quando o envio não é legível (não inventa veredito)", async () => {
+    const fetchFn = (async () => new Response("{}", { status: 404 })) as typeof fetch
+    expect(await fetchShipmentLogisticType(777, "token", fetchFn)).toBeNull()
   })
 })
 
