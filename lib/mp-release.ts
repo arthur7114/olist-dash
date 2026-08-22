@@ -13,6 +13,11 @@ export type MpPaymentRelease = {
   moneyReleaseStatus: string | null
   moneyReleaseDate: string | null
   amount: number
+  // Líquido recebido (transaction_details.net_received_amount). A tarifa vem em
+  // charges_details, mas bruto − líquido é a definição estável (fee_details vem
+  // vazio e cashback não deduz do vendedor — validado ao vivo).
+  netAmount: number
+  refundedAmount: number
 }
 
 // "disputed" = existe pagamento, mas nenhum aprovado e algum está em mediação
@@ -29,6 +34,10 @@ export type MlOrderRelease = {
   // Última money_release_date entre os pagamentos aprovados (um pack pode ter vários).
   releaseDate: string | null
   amount: number
+  // Somas dos pagamentos APROVADOS: líquido, tarifa (bruto − líquido) e estornos.
+  netAmount: number
+  feeAmount: number
+  refundedAmount: number
   payments: MpPaymentRelease[]
 }
 
@@ -38,6 +47,10 @@ type MpPayment = {
   money_release_status?: string
   money_release_date?: string
   transaction_amount?: number
+  transaction_amount_refunded?: number
+  transaction_details?: {
+    net_received_amount?: number
+  }
 }
 
 // Agrega os pagamentos de um pedido/pack num veredito único. Só pagamentos
@@ -45,6 +58,8 @@ type MpPayment = {
 // pagamento pendente ainda não pode ser baixado). Sem nenhum aprovado, não há o
 // que conciliar (cancelado/devolvido fica de fora — devolução é outro fluxo),
 // exceto quando há disputa em curso, que ganha veredito próprio.
+const round2 = (v: number) => Math.round(v * 100) / 100
+
 export function aggregateRelease(mlOrderId: string, payments: MpPaymentRelease[]): MlOrderRelease {
   const approved = payments.filter((p) => p.status === "approved")
   if (!approved.length) {
@@ -54,23 +69,39 @@ export function aggregateRelease(mlOrderId: string, payments: MpPaymentRelease[]
         mlOrderId,
         releaseStatus: "disputed",
         releaseDate: null,
-        amount: Math.round(disputed.reduce((sum, p) => sum + p.amount, 0) * 100) / 100,
+        amount: round2(disputed.reduce((sum, p) => sum + p.amount, 0)),
+        netAmount: 0,
+        feeAmount: 0,
+        refundedAmount: 0,
         payments,
       }
     }
-    return { mlOrderId, releaseStatus: "no_payments", releaseDate: null, amount: 0, payments }
+    return {
+      mlOrderId,
+      releaseStatus: "no_payments",
+      releaseDate: null,
+      amount: 0,
+      netAmount: 0,
+      feeAmount: 0,
+      refundedAmount: 0,
+      payments,
+    }
   }
   const released = approved.every((p) => p.moneyReleaseStatus === "released")
   const releaseDate = approved.reduce<string | null>(
     (max, p) => (p.moneyReleaseDate && (!max || p.moneyReleaseDate > max) ? p.moneyReleaseDate : max),
     null,
   )
-  const amount = approved.reduce((sum, p) => sum + p.amount, 0)
+  const amount = round2(approved.reduce((sum, p) => sum + p.amount, 0))
+  const netAmount = round2(approved.reduce((sum, p) => sum + p.netAmount, 0))
   return {
     mlOrderId,
     releaseStatus: released ? "released" : "pending",
     releaseDate,
-    amount: Math.round(amount * 100) / 100,
+    amount,
+    netAmount,
+    feeAmount: round2(amount - netAmount),
+    refundedAmount: round2(approved.reduce((sum, p) => sum + p.refundedAmount, 0)),
     payments,
   }
 }
@@ -82,7 +113,16 @@ export async function fetchMlOrderRelease(
 ): Promise<MlOrderRelease> {
   const resolved = await resolveMlOrders(mlOrderId, accessToken, fetchFn)
   if (!resolved) {
-    return { mlOrderId, releaseStatus: "not_found", releaseDate: null, amount: 0, payments: [] }
+    return {
+      mlOrderId,
+      releaseStatus: "not_found",
+      releaseDate: null,
+      amount: 0,
+      netAmount: 0,
+      feeAmount: 0,
+      refundedAmount: 0,
+      payments: [],
+    }
   }
 
   const paymentIds = Array.from(
@@ -109,6 +149,8 @@ export async function fetchMlOrderRelease(
       moneyReleaseStatus: payment.money_release_status ?? null,
       moneyReleaseDate: payment.money_release_date ?? null,
       amount: payment.transaction_amount ?? 0,
+      netAmount: payment.transaction_details?.net_received_amount ?? 0,
+      refundedAmount: payment.transaction_amount_refunded ?? 0,
     })
   }
 

@@ -6,6 +6,10 @@ export type MpReleaseCandidate = {
   olistId: string
   mlOrderId: string
   data: string
+  // Da raw do pedido: id da NF (fluxo Full usa /notas/{id}/lancar-contas).
+  idNotaFiscal: string | null
+  // Carimbo de lancar-contas já executado (nunca relançar).
+  contasLancadasAt: string | Date | null
 }
 
 // Pedidos ML faturados/enviados/entregues cuja liberação ainda não terminou de
@@ -28,7 +32,9 @@ export async function getMpReleaseCandidates(
   const res = await db.execute(sql`
     select o.olist_id as "olistId",
            o.raw->'ecommerce'->>'numeroPedidoEcommerce' as "mlOrderId",
-           o.data::text as "data"
+           o.data::text as "data",
+           o.raw->>'idNotaFiscal' as "idNotaFiscal",
+           r.contas_lancadas_at as "contasLancadasAt"
     from orders o
     left join mp_releases r on r.olist_id = o.olist_id
     where o.canal ilike 'mercado livre%'
@@ -59,9 +65,13 @@ export async function upsertMpRelease(row: {
   releaseStatus: string
   releaseDate: Date | null
   amount: number
+  netAmount?: number | null
+  feeAmount?: number | null
   receivableId?: number | null
   baixaStatus?: string
+  baixaScheme?: string | null
   baixaAt?: Date | null
+  contasLancadasAt?: Date | null
   lastError?: string | null
 }): Promise<void> {
   const db = getDb()
@@ -71,9 +81,13 @@ export async function upsertMpRelease(row: {
     releaseStatus: row.releaseStatus,
     releaseDate: row.releaseDate,
     amount: String(row.amount),
+    netAmount: row.netAmount != null ? String(row.netAmount) : null,
+    feeAmount: row.feeAmount != null ? String(row.feeAmount) : null,
     receivableId: row.receivableId ?? null,
     baixaStatus: row.baixaStatus ?? "pending",
+    baixaScheme: row.baixaScheme ?? null,
     baixaAt: row.baixaAt ?? null,
+    contasLancadasAt: row.contasLancadasAt ?? null,
     lastError: row.lastError ?? null,
     checkedAt: new Date(),
   }
@@ -87,10 +101,16 @@ export async function upsertMpRelease(row: {
         releaseStatus: sql`excluded.release_status`,
         releaseDate: sql`excluded.release_date`,
         amount: sql`excluded.amount`,
+        // Último veredito do MP quando calculado; senão preserva o anterior.
+        netAmount: sql`coalesce(excluded.net_amount, mp_releases.net_amount)`,
+        feeAmount: sql`coalesce(excluded.fee_amount, mp_releases.fee_amount)`,
         receivableId: sql`excluded.receivable_id`,
         baixaStatus: sql`excluded.baixa_status`,
-        // Preserva o carimbo da baixa já feita (o upsert seguinte não a refaz).
+        baixaScheme: sql`coalesce(excluded.baixa_scheme, mp_releases.baixa_scheme)`,
+        // Preserva o carimbo da baixa já feita (o upsert seguinte não a refaz)
+        // e o de lancar-contas (nunca relançar as contas da NF).
         baixaAt: sql`coalesce(excluded.baixa_at, mp_releases.baixa_at)`,
+        contasLancadasAt: sql`coalesce(excluded.contas_lancadas_at, mp_releases.contas_lancadas_at)`,
         lastError: sql`excluded.last_error`,
         checkedAt: sql`excluded.checked_at`,
       },
