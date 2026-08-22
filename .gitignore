@@ -18,3 +18,8 @@ node_modules
 .DS_Store
 
 .vercel
+.env*
+data/
+outputs/
+report/
+__pycache__/
