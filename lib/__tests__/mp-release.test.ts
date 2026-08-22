@@ -9,6 +9,8 @@ const payment = (over: Partial<MpPaymentRelease>): MpPaymentRelease => ({
   moneyReleaseStatus: "released",
   moneyReleaseDate: "2026-06-20T14:01:19.000-04:00",
   amount: 100,
+  netAmount: 100,
+  refundedAmount: 0,
   ...over,
 })
 
@@ -69,6 +71,47 @@ describe("aggregateRelease", () => {
     expect(result.releaseStatus).toBe("released")
     expect(result.amount).toBe(20)
   })
+
+  it("soma líquido dos aprovados e deriva a tarifa (bruto − líquido)", () => {
+    // Valores reais da conta: bruto 73,00 → líquido 48,17; bruto 33,76 → 22,51.
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, amount: 73, netAmount: 48.17 }),
+      payment({ paymentId: 2, amount: 33.76, netAmount: 22.51 }),
+    ])
+    expect(result.amount).toBe(106.76)
+    expect(result.netAmount).toBe(70.68)
+    expect(result.feeAmount).toBe(36.08)
+  })
+
+  it("venda sem tarifa tem feeAmount zero", () => {
+    const result = aggregateRelease("123", [payment({ amount: 50, netAmount: 50 })])
+    expect(result.netAmount).toBe(50)
+    expect(result.feeAmount).toBe(0)
+  })
+
+  it("tarifa não sofre drift de float (arredonda a centavo)", () => {
+    // 0.1+0.2 style: 10.1 − 10.03 = 0.07000000000000028 sem arredondamento.
+    const result = aggregateRelease("123", [payment({ amount: 10.1, netAmount: 10.03 })])
+    expect(result.feeAmount).toBe(0.07)
+  })
+
+  it("agrega o valor estornado dos pagamentos aprovados", () => {
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, amount: 100, netAmount: 88, refundedAmount: 30 }),
+      payment({ paymentId: 2, amount: 50, netAmount: 44 }),
+    ])
+    expect(result.refundedAmount).toBe(30)
+  })
+
+  it("pagamentos não aprovados não contaminam líquido/tarifa/estorno", () => {
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, status: "rejected", amount: 999, netAmount: 900, refundedAmount: 999 }),
+      payment({ paymentId: 2, amount: 80, netAmount: 70 }),
+    ])
+    expect(result.netAmount).toBe(70)
+    expect(result.feeAmount).toBe(10)
+    expect(result.refundedAmount).toBe(0)
+  })
 })
 
 describe("fetchMlOrderRelease", () => {
@@ -91,6 +134,8 @@ describe("fetchMlOrderRelease", () => {
           money_release_status: "released",
           money_release_date: "2026-06-20T14:01:19.000-04:00",
           transaction_amount: 261.61,
+          transaction_amount_refunded: 0,
+          transaction_details: { net_received_amount: 199.9 },
         })
       throw new Error(`URL inesperada: ${url}`)
     }) as typeof fetch
@@ -98,7 +143,11 @@ describe("fetchMlOrderRelease", () => {
     const result = await fetchMlOrderRelease("999", "token", fetchFn)
     expect(result.releaseStatus).toBe("released")
     expect(result.amount).toBe(261.61)
+    expect(result.netAmount).toBe(199.9)
+    expect(result.feeAmount).toBe(61.71)
     expect(result.payments).toHaveLength(1)
+    expect(result.payments[0].netAmount).toBe(199.9)
+    expect(result.payments[0].refundedAmount).toBe(0)
     expect(calls.some((u) => u.includes("api.mercadopago.com/v1/payments/555"))).toBe(true)
   })
 
@@ -176,6 +225,37 @@ describe("buildBaixaBody", () => {
   it("omite historico quando ausente", () => {
     const body = buildBaixaBody({ valorPago: 50, data: new Date("2026-01-10T12:00:00.000Z") })
     expect(body).toEqual({ data: "10/01/2026", valorPago: 50 })
+  })
+
+  it("payload validado em produção: líquido + taxa + contaDestino + categoria", () => {
+    // Semântica confirmada ao vivo (conta 362259083, 22/08/2026): valorPago=líquido
+    // e taxa=tarifa QUITAM o título pelo bruto; contaDestino direciona o dinheiro
+    // (sem ele cai na conta padrão) e categoria preserva VENDAS MERCADO LIVRE
+    // (sem ela — ou com outra — o recebimento INTEIRO é reclassificado).
+    const body = buildBaixaBody({
+      valorPago: 203.43,
+      taxa: 63.94,
+      contaDestino: { id: 348321811 },
+      categoria: { id: 350314766 },
+      data: new Date("2026-08-22T12:00:00.000Z"),
+      historico: "Baixa MP: pedido 2000014472588973",
+    })
+    expect(body).toEqual({
+      data: "22/08/2026",
+      valorPago: 203.43,
+      taxa: 63.94,
+      juros: 0,
+      desconto: 0,
+      acrescimo: 0,
+      contaDestino: { id: 348321811 },
+      categoria: { id: 350314766 },
+      historico: "Baixa MP: pedido 2000014472588973",
+    })
+  })
+
+  it("arredonda a taxa a centavos como o valorPago", () => {
+    const body = buildBaixaBody({ valorPago: 10, taxa: 0.07000000000000028, data: new Date("2026-01-10T12:00:00.000Z") })
+    expect(body.taxa).toBe(0.07)
   })
 })
 

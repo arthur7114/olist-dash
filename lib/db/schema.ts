@@ -78,9 +78,19 @@ export const mpReleases = pgTable(
     releaseStatus: text("release_status").notNull().default("unknown"), // released | pending | no_payments | not_found
     releaseDate: timestamp("release_date", { withTimezone: true }),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    // Detalhamento financeiro do MP (net_received_amount; tarifa = bruto − líquido).
+    netAmount: numeric("net_amount", { precision: 14, scale: 2 }),
+    feeAmount: numeric("fee_amount", { precision: 14, scale: 2 }),
     receivableId: integer("receivable_id"),
-    baixaStatus: text("baixa_status").notNull().default("pending"), // pending | done | already_paid | receivable_not_found | error
+    baixaStatus: text("baixa_status").notNull().default("pending"), // pending | done | already_paid | receivable_not_found | divergence | error
+    // 'gross' = legado (baixa pelo bruto, sem tarifa); 'net_fee' = esquema atual
+    // (valorPago=líquido + taxa=tarifa + contaDestino + categoria). Separa eras;
+    // linhas 'gross' nunca são retocadas.
+    baixaScheme: text("baixa_scheme"),
     baixaAt: timestamp("baixa_at", { withTimezone: true }),
+    // Carimbo do POST /notas/{id}/lancar-contas (pedidos Full sem conta): garante
+    // que a geração de contas da NF acontece no máximo uma vez por pedido.
+    contasLancadasAt: timestamp("contas_lancadas_at", { withTimezone: true }),
     lastError: text("last_error"),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
   },

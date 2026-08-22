@@ -972,6 +972,14 @@ export type BaixaContaReceber = {
   valorPago: number
   data: Date
   historico?: string
+  // Payload validado em produção (22/08/2026, conta 362259083): valorPago=líquido
+  // + taxa=tarifa QUITAM o título pelo bruto e a taxa alimenta "Taxas e tarifas"
+  // na DRE. contaDestino direciona a conta financeira (sem ele o dinheiro cai na
+  // conta padrão); categoria preserva a classificação do recebimento — sem ela
+  // (ou com outra) o recebimento INTEIRO é reclassificado.
+  taxa?: number
+  contaDestino?: { id: number }
+  categoria?: { id: number }
 }
 
 // O swagger da v3 documenta o campo `data` do POST /baixar como dd/mm/yyyy
@@ -980,6 +988,11 @@ export function buildBaixaBody(baixa: BaixaContaReceber) {
   return {
     data: formatDateBr(baixa.data),
     valorPago: Math.round(baixa.valorPago * 100) / 100,
+    ...(baixa.taxa !== undefined
+      ? { taxa: Math.round(baixa.taxa * 100) / 100, juros: 0, desconto: 0, acrescimo: 0 }
+      : {}),
+    ...(baixa.contaDestino ? { contaDestino: baixa.contaDestino } : {}),
+    ...(baixa.categoria ? { categoria: baixa.categoria } : {}),
     ...(baixa.historico ? { historico: baixa.historico } : {}),
   }
 }
@@ -999,6 +1012,30 @@ export async function baixarContaReceber(
     method: "POST",
     body: buildBaixaBody(baixa),
   })
+}
+
+// Gera as contas (a receber) de uma nota fiscal já autorizada. 204 = sucesso.
+// Usado para pedidos Full, cuja integração ML→Olist não cria o financeiro
+// (validado ao vivo: 8/8 receivable_not_found pós-jun/2026 eram fulfillment).
+// Mutação: sem retry em 5xx; o chamador garante no máximo uma execução por
+// pedido (mp_releases.contas_lancadas_at).
+export async function lancarContasNota(accessToken: string, idNota: number): Promise<void> {
+  await tinyFetch<void>(accessToken, `/notas/${idNota}/lancar-contas`, { method: "POST" })
+}
+
+// Contas a receber vinculadas a uma nota fiscal (filtro idNota da listagem).
+// Vínculo mais forte que o "OC nº" do historico — as contas geradas por
+// lancar-contas podem nem carregar o OC no texto.
+export async function fetchReceivablesByNota(
+  accessToken: string,
+  idNota: number,
+): Promise<TinyReceivable[]> {
+  const params = new URLSearchParams({ idNota: String(idNota), limit: "100" })
+  const list = await tinyFetch<TinyListResponse<TinyReceivable>>(
+    accessToken,
+    `/contas-receber?${params.toString()}`,
+  )
+  return list.itens ?? []
 }
 
 function findReceivableOrder(
