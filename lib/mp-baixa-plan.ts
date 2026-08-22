@@ -15,6 +15,7 @@ export type DivergenceReason =
   | "refund_present"
   | "multiple_open_receivables"
   | "duplicate_receivables"
+  | "ambiguous_receivables"
   | "gross_mismatch"
   | "partial_balance"
   | "invalid_net"
@@ -65,6 +66,19 @@ export function planBaixa(release: MlOrderRelease, contas: TinyReceivable[]): Ba
       action: "divergence",
       reason: "multiple_open_receivables",
       detail: `${abertas.length} contas abertas (ids: ${abertas.map((c) => c.id ?? "?").join(", ")}) — esperada exatamente 1`,
+    }
+  }
+
+  // A baixa exige que a aberta seja a ÚNICA conta do pedido: aberta convivendo
+  // com cancelada/emissao é ambíguo (re-emissão? duplicata meio-cancelada?).
+  if (contas.length > 1) {
+    return {
+      action: "divergence",
+      reason: "ambiguous_receivables",
+      detail: `conta aberta ${abertas[0].id ?? "?"} convive com ${contas.length - 1} conta(s) em situação ${contas
+        .filter((c) => c !== abertas[0])
+        .map((c) => c.situacao ?? "?")
+        .join(", ")} — resolver manualmente`,
     }
   }
 

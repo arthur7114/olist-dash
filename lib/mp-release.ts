@@ -81,7 +81,12 @@ export function aggregateRelease(mlOrderId: string, payments: MpPaymentRelease[]
 
   // Mediação/chargeback em qualquer pagamento contamina o pack: mesmo o valor
   // já aprovado pode ser revertido pela disputa. Nada libera até resolver.
-  const emDisputa = payments.filter((p) => DISPUTE_STATUS.includes(p.status ?? ""))
+  // Um pagamento REFUNDED ao lado de aprovados também bloqueia (estorno pode
+  // reverter dinheiro do conjunto); refunded SOZINHO segue como no_payments —
+  // devolução total é outro fluxo, terminal.
+  const emDisputa = payments.filter(
+    (p) => DISPUTE_STATUS.includes(p.status ?? "") || (p.status === "refunded" && approved.length > 0),
+  )
   if (emDisputa.length) {
     return {
       mlOrderId,

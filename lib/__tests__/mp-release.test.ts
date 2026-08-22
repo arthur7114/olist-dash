@@ -65,6 +65,16 @@ describe("aggregateRelease", () => {
     expect(aggregateRelease("123", [payment({ status: "charged_back" })]).releaseStatus).toBe("disputed")
   })
 
+  it("pagamento refunded ao lado de aprovado bloqueia o pack", () => {
+    // Estorno de um pagamento do pack pode reverter dinheiro do conjunto:
+    // nada libera até conferência manual (revisão 22/08, item 3).
+    const result = aggregateRelease("123", [
+      payment({ paymentId: 1, status: "refunded", moneyReleaseStatus: null, amount: 30 }),
+      payment({ paymentId: 2, status: "approved", amount: 20 }),
+    ])
+    expect(result.releaseStatus).toBe("disputed")
+  })
+
   it("mediação/chargeback em QUALQUER pagamento bloqueia o pack inteiro", () => {
     // Um pack com um pagamento aprovado e outro em mediação não pode liberar:
     // o dinheiro da disputa ainda pode ser revertido (revisão 22/08, P1).

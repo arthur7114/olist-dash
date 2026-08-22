@@ -68,6 +68,31 @@ export async function getMpReleaseCandidates(
   return res.rows as unknown as MpReleaseCandidate[]
 }
 
+// Claim ATÔMICO do lancar-contas (revisão 22/08, item 2): um único statement
+// carimba contas_lancadas_at somente se (a) a linha ainda não tem carimbo — o
+// lock de linha do Postgres garante que execuções concorrentes não passam as
+// duas — e (b) o TETO GLOBAL de lançamentos na janela de 24h não foi atingido
+// (contado no banco, não em memória por processo). Retorna true = este
+// processo ganhou o direito de chamar POST /notas/{id}/lancar-contas.
+export async function claimContasLancadas(
+  olistId: string,
+  mlOrderId: string,
+  maxPerDay: number,
+): Promise<boolean> {
+  const db = getDb()
+  const res = await db.execute(sql`
+    insert into mp_releases (olist_id, ml_order_id, release_status, baixa_status, contas_lancadas_at, checked_at)
+    select ${olistId}, ${mlOrderId}, 'released', 'receivable_not_found', now(), now()
+    where (select count(*) from mp_releases where contas_lancadas_at >= now() - interval '24 hours') < ${maxPerDay}
+    on conflict (olist_id) do update
+      set contas_lancadas_at = now(), checked_at = now()
+      where mp_releases.contas_lancadas_at is null
+        and (select count(*) from mp_releases where contas_lancadas_at >= now() - interval '24 hours') < ${maxPerDay}
+    returning olist_id
+  `)
+  return res.rows.length > 0
+}
+
 export async function upsertMpRelease(row: {
   olistId: string
   mlOrderId: string

@@ -94,6 +94,14 @@ describe("planBaixa", () => {
     expect(decision).toMatchObject({ reason: "multiple_open_receivables" })
   })
 
+  it("a baixa exige que a conta aberta seja a ÚNICA conta do pedido", () => {
+    // Aberta convivendo com cancelada/emissao é ambíguo (re-emissão? duplicata
+    // cancelada pela metade?) — trava manual em vez de adivinhar.
+    const decision = planBaixa(release(), [conta(), conta({ id: 999, situacao: "cancelada" })])
+    expect(decision.action).toBe("divergence")
+    expect(decision).toMatchObject({ reason: "ambiguous_receivables" })
+  })
+
   it("bruto diferente do valor original da conta: divergência", () => {
     const decision = planBaixa(release({ amount: 250, netAmount: 190, feeAmount: 60 }), [conta()])
     expect(decision.action).toBe("divergence")

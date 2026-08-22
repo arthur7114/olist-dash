@@ -28,7 +28,7 @@ import {
   type TinyReceivable,
 } from "@/lib/olist-v3"
 import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
-import { getMpReleaseCandidates, getMpReleaseStats, upsertMpRelease } from "@/lib/db/mpReleases"
+import { claimContasLancadas, getMpReleaseCandidates, getMpReleaseStats, upsertMpRelease } from "@/lib/db/mpReleases"
 
 const BUDGET_MS = Number(process.env.MP_RECONCILE_BUDGET_MS) || 230_000
 // Janela de pedidos considerados: liberação do ML acontece até ~30 dias depois
@@ -89,27 +89,39 @@ export type MpReconcileSummary = {
 const MP_CONTA_DESTINO_ID = 348321811 // conta financeira "Mercado Pago"
 const ML_VENDAS_CATEGORIA_ID = 350314766 // categoria "VENDAS MERCADO LIVRE"
 
-// Teto de lancar-contas por execução, mesmo com ?full=1: lote controlado.
-const MAX_NOTAS_LANCADAS_POR_RUN = 20
+// Teto GLOBAL de lancar-contas por janela de 24h, mesmo com ?full=1 — contado
+// no banco pelo claim atômico, então vale através de execuções concorrentes
+// e encadeadas (lote controlado de verdade, não por processo).
+const MAX_NOTAS_LANCADAS_POR_DIA = 20
 
 // Gate do lançamento de contas para pedido Full (revisão 22/08, P0): só lança
 // com comprovação de que o envio é fulfillment no ML E de que a NF está
 // autorizada (situação 6/7). Qualquer dúvida = não lança (fail-closed).
+// `kind` distingue o destino: "not_full" = pedido liberado NÃO-Full sem conta
+// (divergência de negócio: a conta deveria existir); "nf_pendente" e
+// "sem_shipment" = transitórios, ficam receivable_not_found e re-checam.
+type FullGate = { ok: true } | { ok: false; kind: "not_full" | "nf_pendente" | "sem_shipment"; motivo: string }
+
 async function verifyFullGate(
   release: MlOrderRelease,
   idNota: number,
   mlToken: string,
   olistToken: string,
-): Promise<{ ok: true } | { ok: false; motivo: string }> {
+): Promise<FullGate> {
   const shipmentId = release.shipmentIds?.[0]
-  if (!shipmentId) return { ok: false, motivo: "pedido sem shipment no ML — não comprova Full" }
+  if (!shipmentId) {
+    return { ok: false, kind: "sem_shipment", motivo: "pedido sem shipment no ML — não comprova Full" }
+  }
   const logistic = await fetchShipmentLogisticType(shipmentId, mlToken)
+  if (logistic === null) {
+    return { ok: false, kind: "sem_shipment", motivo: "shipment ilegível no ML — não comprova Full" }
+  }
   if (logistic !== "fulfillment") {
-    return { ok: false, motivo: `envio ${logistic ?? "ilegível"} não é fulfillment — não é Full` }
+    return { ok: false, kind: "not_full", motivo: `envio ${logistic} não é fulfillment — pedido liberado sem conta a receber` }
   }
   const situacao = await fetchNotaSituacao(olistToken, idNota)
   if (situacao === null || !NOTA_SITUACOES_AUTORIZADAS.has(situacao)) {
-    return { ok: false, motivo: `NF ${idNota} em situação ${situacao ?? "ilegível"} — não autorizada` }
+    return { ok: false, kind: "nf_pendente", motivo: `NF ${idNota} em situação ${situacao ?? "ilegível"} — não autorizada` }
   }
   return { ok: true }
 }
@@ -211,24 +223,23 @@ export async function runMpReconcile(
       // Só executa com a flag explícita (?full=1) e dentro do teto por run;
       // caso contrário os aptos são apenas reportados em notasALancar.
       let fullGateMotivo: string | null = null
+      let fullGateNotFull = false
       if (!contas.length && idNota && !candidate.contasLancadasAt) {
         const gate = await verifyFullGate(release, idNota, mlToken, olistToken)
         if (!gate.ok) {
           fullGateMotivo = gate.motivo
+          fullGateNotFull = gate.kind === "not_full"
         } else if (dryRun || !enableFullLancamento) {
           notasALancar.push({ olistId: candidate.olistId, mlOrderId: candidate.mlOrderId, idNotaFiscal: idNota })
           fullGateMotivo = dryRun ? "apto a lancar-contas (dry-run)" : "apto a lancar-contas (aguardando ?full=1)"
-        } else if (notasLancadas >= MAX_NOTAS_LANCADAS_POR_RUN) {
+        } else if (!(await claimContasLancadas(candidate.olistId, candidate.mlOrderId, MAX_NOTAS_LANCADAS_POR_DIA))) {
+          // Claim atômico no banco: ou outra execução carimbou este pedido
+          // antes, ou o teto GLOBAL de lançamentos em 24h foi atingido.
           notasALancar.push({ olistId: candidate.olistId, mlOrderId: candidate.mlOrderId, idNotaFiscal: idNota })
-          fullGateMotivo = `apto, mas teto de ${MAX_NOTAS_LANCADAS_POR_RUN} lançamentos por execução atingido`
+          fullGateMotivo = `apto, mas claim negado (já carimbado por outra execução ou teto global de ${MAX_NOTAS_LANCADAS_POR_DIA}/24h atingido)`
         } else {
-          // Write-ahead: carimbo persistido ANTES da mutação.
-          await upsertMpRelease({
-            ...base,
-            baixaStatus: "receivable_not_found",
-            contasLancadasAt: new Date(),
-            lastError: `lancar-contas da NF ${idNota}: em execução`,
-          })
+          // Claim ganho = carimbo já persistido ANTES da mutação (write-ahead):
+          // se o processo cair aqui, nunca relançamos; pendência fica manual.
           try {
             await lancarContasNota(olistToken, idNota)
             notasLancadas += 1
@@ -257,6 +268,19 @@ export async function runMpReconcile(
       }
 
       if (decision.action === "receivable_not_found") {
+        // Pedido liberado, comprovadamente NÃO-Full e sem conta em lugar
+        // nenhum: a conta deveria existir no ERP — divergência de negócio
+        // (item 5 da revisão), não um "ainda não achei".
+        if (fullGateNotFull) {
+          divergences += 1
+          await upsertMpRelease({
+            ...base,
+            baixaStatus: "divergence",
+            lastError: `missing_receivable_not_full: ${fullGateMotivo}`,
+          })
+          await delay(INTERVALO_MS)
+          continue
+        }
         receivableNotFound += 1
         await upsertMpRelease({
           ...base,
