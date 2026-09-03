@@ -2,13 +2,13 @@
 
 import { BadgeCheck } from "lucide-react"
 import { useFiltros } from "@/lib/filters"
-import { formatPercent } from "@/lib/data"
+import { formatPercent, isCanalMercadoLivre } from "@/lib/data"
 
 // Mostra quantos pedidos ML do período têm tarifa/frete REAIS da API do ML.
 // Some quando não há pedidos ML no filtro atual.
 export function MlCostCoverage() {
   const { pedidosFiltrados } = useFiltros()
-  const ml = pedidosFiltrados.filter((p) => p.canal === "Mercado Livre")
+  const ml = pedidosFiltrados.filter((p) => isCanalMercadoLivre(p.canal))
   if (!ml.length) return null
   const reais = ml.filter((p) => p.custoMlReal).length
   const cobertura = reais / ml.length

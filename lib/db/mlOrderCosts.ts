@@ -39,6 +39,9 @@ export async function upsertMlOrderCost(row: {
 
 // Pedidos ML sem custo real importado, mais recentes primeiro.
 // O id do pedido no ML vem do raw da Olist (ecommerce.numeroPedidoEcommerce).
+// O canal casa por ilike porque a Olist grava "Mercado Livre", "Mercado Livre
+// Fulfillment" (Full) e "MERCADO LIVRE" — igualdade exata deixava o Full sem
+// custo real e no fallback de 16% + frete zero (ver isCanalMercadoLivre em lib/data).
 export async function getOrdersMissingMlCost(
   limit: number,
 ): Promise<Array<{ olistId: string; mlOrderId: string }>> {
@@ -47,7 +50,7 @@ export async function getOrdersMissingMlCost(
     select o.olist_id as "olistId",
            o.raw->'ecommerce'->>'numeroPedidoEcommerce' as "mlOrderId"
     from orders o
-    where o.canal = 'Mercado Livre'
+    where o.canal ilike '%mercado livre%'
       and coalesce(o.raw->'ecommerce'->>'numeroPedidoEcommerce', '') <> ''
       and not exists (select 1 from ml_order_costs m where m.olist_id = o.olist_id)
     order by o.data desc

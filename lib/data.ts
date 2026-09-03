@@ -193,6 +193,14 @@ const COMISSAO_POR_CANAL: { match: string; taxa: number }[] = [
   { match: "shopee", taxa: pctEnv(process.env.NEXT_PUBLIC_COMISSAO_SHOPEE, 0.2) },
 ]
 
+// A Olist grava o ML com mais de uma grafia de canal: "Mercado Livre",
+// "Mercado Livre Fulfillment" (pedidos Full) e "MERCADO LIVRE". Qualquer
+// comparação de canal ML deve passar por aqui (espelha o `ilike '%mercado livre%'`
+// usado nas queries SQL).
+export function isCanalMercadoLivre(canal: string): boolean {
+  return canal.toLowerCase().includes("mercado livre")
+}
+
 function comissaoEstimada(p: Pedido): number {
   const canal = p.canal.toLowerCase()
   const regra = COMISSAO_POR_CANAL.find((r) => canal.includes(r.match))
