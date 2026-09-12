@@ -54,3 +54,24 @@ export async function getSkusMissingCost(limit = 500): Promise<string[]> {
   `)
   return (res.rows as unknown as Array<{ sku: string }>).map((r) => r.sku)
 }
+
+// SKUs de anúncios ativos cujo custo no cache já passou de `days` dias. O custo só se
+// atualiza sozinho quando o produto aparece num pedido sincronizado; produto que vende
+// pouco fica com o custo congelado mesmo depois de uma entrada de estoque nova na Olist.
+export async function getSkusStaleCost(days = 7, limit = 500): Promise<string[]> {
+  const db = getDb()
+  const res = await db.execute(sql`
+    with ativos as (
+      select distinct btrim(seller_sku) sku
+      from ml_items
+      where status = 'active' and seller_sku is not null and btrim(seller_sku) <> ''
+    )
+    select a.sku
+    from ativos a
+    join product_costs pc on pc.ref = 'sku:' || a.sku
+    where pc.custo > 0 and pc.updated_at < now() - make_interval(days => ${days})
+    order by pc.updated_at
+    limit ${limit}
+  `)
+  return (res.rows as unknown as Array<{ sku: string }>).map((r) => r.sku)
+}

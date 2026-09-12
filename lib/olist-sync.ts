@@ -20,7 +20,7 @@ import {
   updateOrderNotaFacts,
   upsertOrders,
 } from "@/lib/db/orders"
-import { getAllProductCosts, getSkusMissingCost, saveProductCosts } from "@/lib/db/productCosts"
+import { getAllProductCosts, getSkusMissingCost, getSkusStaleCost, saveProductCosts } from "@/lib/db/productCosts"
 
 export type SyncSummary = {
   ok: true
@@ -262,6 +262,10 @@ export type BackfillCostsSummary = {
   scanned: number
   /** Quantos passaram a ter custo. */
   filled: number
+  /** Custos já existentes que foram relidos da Olist por estarem velhos. */
+  refreshed: number
+  /** Desses, quantos mudaram de valor (entrada de estoque mexeu no custo médio). */
+  changed: number
   /** Existem na Olist, mas com o custo em branco no cadastro: alguém precisa preencher lá. */
   semCustoNaOlist: string[]
   /** Não foram encontrados na Olist por esse SKU: cadastro divergente entre anúncio e ERP. */
@@ -275,7 +279,7 @@ export type BackfillCostsSummary = {
 // que apareceu em pedido; anúncio ativo que nunca vendeu fica sem custo para sempre, e sem
 // custo não há preço nem promoção. Resumível: rode de novo até remaining = 0.
 export async function runBackfillListingCosts(
-  options: { limit?: number } = {},
+  options: { limit?: number; refreshDays?: number } = {},
 ): Promise<BackfillCostsSummary> {
   const startedAt = Date.now()
   const deadline = startedAt + BUDGET_MS
@@ -285,33 +289,53 @@ export async function runBackfillListingCosts(
   const refreshed = await refreshAccessToken(creds.refreshToken)
   await saveCredentials(refreshed)
 
-  const missing = await getSkusMissingCost(options.limit ?? 500)
-  const costs = await fetchCostsBySku(refreshed.access_token, missing, { deadline })
+  const limit = options.limit ?? 500
+  const missing = await getSkusMissingCost(limit)
+  // Sobrou orçamento? Reler os custos velhos: é assim que uma entrada de estoque na Olist
+  // chega até aqui num produto que não vende há semanas.
+  const refreshDays = options.refreshDays ?? 7
+  const stale = refreshDays > 0 && missing.length < limit
+    ? await getSkusStaleCost(refreshDays, limit - missing.length)
+    : []
+  const anteriores = new Map(
+    (await getAllProductCosts())
+      .filter((c) => c.ref.startsWith("sku:"))
+      .map((c) => [c.ref.slice(4), c.custo]),
+  )
+  const eraStale = new Set(stale)
+  const costs = await fetchCostsBySku(refreshed.access_token, [...missing, ...stale], { deadline })
 
   const paraGravar: Array<{ ref: string; custo: number }> = []
   const semCustoNaOlist: string[] = []
   const naoEncontrados: string[] = []
-  for (const sku of missing) {
+  let changed = 0
+  for (const sku of [...missing, ...stale]) {
     const r = costs.get(sku)
     if (!r) continue
     if (!r.found) { naoEncontrados.push(sku); continue }
     if (r.cost > 0) {
+      const antes = anteriores.get(sku)
+      if (antes !== undefined && Math.abs(antes - r.cost) > 0.005) changed += 1
       paraGravar.push({ ref: `sku:${sku}`, custo: r.cost })
       if (typeof r.id === "number") paraGravar.push({ ref: `id:${r.id}`, custo: r.cost })
-    } else semCustoNaOlist.push(sku)
+    } else if (!eraStale.has(sku)) semCustoNaOlist.push(sku)
   }
   await saveProductCosts(paraGravar)
 
   const scanned = costs.size
+  const gravados = paraGravar.filter((e) => e.ref.startsWith("sku:")).map((e) => e.ref.slice(4))
+  const alvo = missing.length + stale.length
   return {
     ok: true,
     totalMissing: missing.length,
     scanned,
-    filled: paraGravar.filter((e) => e.ref.startsWith("sku:")).length,
+    filled: gravados.filter((s) => !anteriores.has(s)).length,
+    refreshed: gravados.filter((s) => anteriores.has(s)).length,
+    changed,
     semCustoNaOlist,
     naoEncontrados,
-    remaining: missing.length - scanned,
-    completed: scanned >= missing.length,
+    remaining: alvo - scanned,
+    completed: scanned >= alvo,
     durationMs: Date.now() - startedAt,
   }
 }
