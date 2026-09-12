@@ -850,6 +850,50 @@ async function fetchProductCosts(
   return lookup
 }
 
+// Busca o custo direto no cadastro da Olist, por SKU. Serve para produto que nunca vendeu:
+// ele nunca aparece num pedido, então o sync de pedidos jamais busca o custo dele.
+// Devolve o custo por SKU (0 quando o cadastro não tem custo preenchido) e o id do produto.
+export async function fetchCostsBySku(
+  accessToken: string,
+  skus: string[],
+  options: { concurrency?: number; deadline?: number } = {},
+): Promise<Map<string, { cost: number; id?: number; found: boolean }>> {
+  const out = new Map<string, { cost: number; id?: number; found: boolean }>()
+  const concurrency = options.concurrency ?? 3
+  await mapWithConcurrency(skus, concurrency, async (sku) => {
+    if (options.deadline && Date.now() >= options.deadline) return
+    try {
+      const params = new URLSearchParams({ codigo: sku, limit: "1" })
+      const list = await tinyFetch<TinyListResponse<TinyProductListItem>>(
+        accessToken,
+        `/produtos?${params.toString()}`,
+      )
+      const product = list.itens?.[0]
+      if (!product) {
+        out.set(sku, { cost: 0, found: false })
+        return
+      }
+      let cost = getProductCost(product)
+      // O resumo da lista às vezes vem sem custo; o detalhe e o histórico têm.
+      if (!(cost > 0) && typeof product.id === "number") {
+        const detail = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${product.id}`)
+        cost = getProductCost(detail)
+        if (!(cost > 0)) {
+          const history = await tinyFetch<TinyProductCostList>(
+            accessToken,
+            `/produtos/${product.id}/custos?limit=1`,
+          )
+          cost = getProductCostFromHistory(history)
+        }
+      }
+      out.set(sku, { cost: cost > 0 ? cost : 0, id: product.id, found: true })
+    } catch {
+      out.set(sku, { cost: 0, found: false })
+    }
+  })
+  return out
+}
+
 function collectProductRefs(orders: TinyOrderDetail[]) {
   const ids = new Set<number>()
   const skus = new Set<string>()

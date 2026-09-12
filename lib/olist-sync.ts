@@ -1,5 +1,6 @@
 import {
   exportProductCostCache,
+  fetchCostsBySku,
   fetchNotaFactsByIds,
   markProductCostsPersisted,
   primeProductCostCache,
@@ -19,7 +20,7 @@ import {
   updateOrderNotaFacts,
   upsertOrders,
 } from "@/lib/db/orders"
-import { getAllProductCosts, saveProductCosts } from "@/lib/db/productCosts"
+import { getAllProductCosts, getSkusMissingCost, saveProductCosts } from "@/lib/db/productCosts"
 
 export type SyncSummary = {
   ok: true
@@ -250,5 +251,67 @@ export async function runBackfillNotas(): Promise<{
     remaining: all.length - scanned,
     completed,
     elapsedMs: Date.now() - startedAt,
+  }
+}
+
+export type BackfillCostsSummary = {
+  ok: true
+  /** SKUs de anúncios ativos que estavam sem custo antes desta execução. */
+  totalMissing: number
+  /** Quantos foram consultados na Olist nesta execução. */
+  scanned: number
+  /** Quantos passaram a ter custo. */
+  filled: number
+  /** Existem na Olist, mas com o custo em branco no cadastro: alguém precisa preencher lá. */
+  semCustoNaOlist: string[]
+  /** Não foram encontrados na Olist por esse SKU: cadastro divergente entre anúncio e ERP. */
+  naoEncontrados: string[]
+  remaining: number
+  completed: boolean
+  durationMs: number
+}
+
+// Preenche o custo dos produtos que nunca venderam. O sync normal só busca custo de produto
+// que apareceu em pedido; anúncio ativo que nunca vendeu fica sem custo para sempre, e sem
+// custo não há preço nem promoção. Resumível: rode de novo até remaining = 0.
+export async function runBackfillListingCosts(
+  options: { limit?: number } = {},
+): Promise<BackfillCostsSummary> {
+  const startedAt = Date.now()
+  const deadline = startedAt + BUDGET_MS
+
+  const creds = await getStoredCredentials()
+  if (!creds) throw new Error("Sem credenciais Olist no banco. Conecte a conta pelo dashboard primeiro.")
+  const refreshed = await refreshAccessToken(creds.refreshToken)
+  await saveCredentials(refreshed)
+
+  const missing = await getSkusMissingCost(options.limit ?? 500)
+  const costs = await fetchCostsBySku(refreshed.access_token, missing, { deadline })
+
+  const paraGravar: Array<{ ref: string; custo: number }> = []
+  const semCustoNaOlist: string[] = []
+  const naoEncontrados: string[] = []
+  for (const sku of missing) {
+    const r = costs.get(sku)
+    if (!r) continue
+    if (!r.found) { naoEncontrados.push(sku); continue }
+    if (r.cost > 0) {
+      paraGravar.push({ ref: `sku:${sku}`, custo: r.cost })
+      if (typeof r.id === "number") paraGravar.push({ ref: `id:${r.id}`, custo: r.cost })
+    } else semCustoNaOlist.push(sku)
+  }
+  await saveProductCosts(paraGravar)
+
+  const scanned = costs.size
+  return {
+    ok: true,
+    totalMissing: missing.length,
+    scanned,
+    filled: paraGravar.filter((e) => e.ref.startsWith("sku:")).length,
+    semCustoNaOlist,
+    naoEncontrados,
+    remaining: missing.length - scanned,
+    completed: scanned >= missing.length,
+    durationMs: Date.now() - startedAt,
   }
 }
