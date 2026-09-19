@@ -193,10 +193,19 @@ export function buildPutBody(product: TinyProductFull, delta: CatalogDelta): Rec
   }
   if (product.marca?.id) body.marca = { id: product.marca.id }
   if (product.categoria?.id) body.categoria = { id: product.categoria.id }
+  // O GET não devolve `padrao`, mas o PUT exige boolean: o primeiro da lista vira padrão.
   if (product.fornecedores?.length) {
     body.fornecedores = product.fornecedores
       .filter((f) => f.id)
-      .map((f) => ({ id: f.id, codigoProdutoNoFornecedor: f.codigoProdutoNoFornecedor, padrao: f.padrao }))
+      .map((f, index) => ({
+        id: f.id,
+        codigoProdutoNoFornecedor: f.codigoProdutoNoFornecedor ?? "",
+        padrao: typeof f.padrao === "boolean" ? f.padrao : index === 0,
+      }))
+  }
+  // O GET devolve `origem` como string ("0"); o PUT espera inteiro.
+  if (product.origem !== undefined && product.origem !== null && product.origem !== "") {
+    body.origem = Number(product.origem)
   }
   if (product.precos) {
     const { preco, precoPromocional, precoCusto } = product.precos

@@ -153,6 +153,18 @@ describe("buildPutBody", () => {
     expect((body.estoque as Record<string, unknown>).quantidade).toBeUndefined()
   })
 
+  it("fornecedor ganha padrao boolean e origem vira inteiro", () => {
+    const body = buildPutBody(
+      { ...product, origem: "0", fornecedores: [{ id: 5, nome: "A", codigoProdutoNoFornecedor: "" }, { id: 6, nome: "B" }] },
+      {},
+    )
+    expect(body.fornecedores).toEqual([
+      { id: 5, codigoProdutoNoFornecedor: "", padrao: true },
+      { id: 6, codigoProdutoNoFornecedor: "", padrao: false },
+    ])
+    expect(body.origem).toBe(0)
+  })
+
   it("falha sem descricao", () => {
     expect(() => buildPutBody({ id: 1 }, {})).toThrow(/descricao/)
   })
