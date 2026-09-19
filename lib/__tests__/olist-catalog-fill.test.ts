@@ -163,6 +163,7 @@ describe("buildPutBody", () => {
       { id: 6, codigoProdutoNoFornecedor: "", padrao: false },
     ])
     expect(body.origem).toBe(0)
+    expect(buildPutBody({ ...product, origem: "" }, {})).not.toHaveProperty("origem")
   })
 
   it("falha sem descricao", () => {

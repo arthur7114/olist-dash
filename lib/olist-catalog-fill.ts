@@ -203,10 +203,10 @@ export function buildPutBody(product: TinyProductFull, delta: CatalogDelta): Rec
         padrao: typeof f.padrao === "boolean" ? f.padrao : index === 0,
       }))
   }
-  // O GET devolve `origem` como string ("0"); o PUT espera inteiro.
-  if (product.origem !== undefined && product.origem !== null && product.origem !== "") {
-    body.origem = Number(product.origem)
-  }
+  // O GET devolve `origem` como string ("0", às vezes ""); o PUT espera inteiro ou nada.
+  const origem = Number(product.origem)
+  if (product.origem !== null && product.origem !== "" && Number.isInteger(origem)) body.origem = origem
+  else delete body.origem
   if (product.precos) {
     const { preco, precoPromocional, precoCusto } = product.precos
     body.precos = stripNil({ preco, precoPromocional, precoCusto })
