@@ -20,7 +20,7 @@ export type TinyTokenResponse = {
 
 type OrderPeriod = "7d" | "15d" | "30d" | "tudo"
 
-class TinyApiError extends Error {
+export class TinyApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
@@ -29,7 +29,7 @@ class TinyApiError extends Error {
   }
 }
 
-type TinyListResponse<T> = {
+export type TinyListResponse<T> = {
   itens?: T[]
   paginacao?: {
     total?: number
@@ -640,7 +640,7 @@ function getRetryDelayMs(response: Response, attempt: number): number {
   return exp + Math.random() * 0.3 * exp
 }
 
-async function tinyFetch<T>(
+export async function tinyFetch<T>(
   accessToken: string,
   path: string,
   init?: { method?: string; body?: unknown },
@@ -1383,4 +1383,91 @@ async function mapWithConcurrency<T, R>(
 
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker))
   return results
+}
+
+// ---------------------------------------------------------------------------
+// Cadastro de produto (catálogo): leitura completa e escrita de descrição,
+// dimensões e anexos. Usado pelo script scripts/olist-catalogo-do-ml.ts.
+
+export type TinyDimensoes = {
+  largura?: number | null
+  altura?: number | null
+  comprimento?: number | null
+  diametro?: number | null
+  pesoLiquido?: number | null
+  pesoBruto?: number | null
+}
+
+export type TinyAnexo = { id?: number; url?: string | null; externo?: boolean | null }
+
+// Campos que o GET /produtos/{id} devolve e o PUT /produtos/{id} aceita
+// (AtualizarProdutoRequestModel = ProdutoModel + descricao + estoque).
+export type TinyProductFull = {
+  id?: number
+  sku?: string
+  descricao?: string
+  descricaoComplementar?: string | null
+  tipo?: string | null // S simples, K kit, V com variações, F fabricado, M matéria-prima
+  situacao?: string | null // A ativo, I inativo, E excluído
+  tipoVariacao?: string | null // N normal, P pai, V variação
+  unidade?: string | null
+  unidadePorCaixa?: string | null
+  ncm?: string | null
+  gtin?: string | null
+  origem?: number | string | null
+  codigoEspecificadorSubstituicaoTributaria?: string | null
+  garantia?: string | null
+  observacoes?: string | null
+  marca?: { id?: number; nome?: string } | null
+  categoria?: { id?: number; nome?: string } | null
+  precos?: { preco?: number; precoPromocional?: number; precoCusto?: number; precoCustoMedio?: number } | null
+  dimensoes?: TinyDimensoes | null
+  tributacao?: { gtinEmbalagem?: string; valorIPIFixo?: number; classeIPI?: string } | null
+  seo?: { titulo?: string; descricao?: string; keywords?: string[]; linkVideo?: string; slug?: string } | null
+  fornecedores?: Array<{ id?: number; nome?: string; codigoProdutoNoFornecedor?: string; padrao?: boolean }> | null
+  estoque?: {
+    controlar?: boolean
+    sobEncomenda?: boolean
+    minimo?: number
+    maximo?: number
+    diasPreparacao?: number
+    localizacao?: string
+    quantidade?: number
+  } | null
+  anexos?: TinyAnexo[] | null
+  variacoes?: unknown[] | null
+}
+
+export async function fetchProductIdBySku(accessToken: string, sku: string): Promise<number | undefined> {
+  const params = new URLSearchParams({ codigo: sku, limit: "5" })
+  const list = await tinyFetch<TinyListResponse<TinyProductListItem>>(accessToken, `/produtos?${params.toString()}`)
+  // A busca por `codigo` é aproximada: confere o SKU exato antes de aceitar.
+  const exact = list.itens?.find((item) => normalizeSku(item.sku) === normalizeSku(sku))
+  return exact?.id ?? undefined
+}
+
+export async function fetchProductFull(accessToken: string, id: number): Promise<TinyProductFull> {
+  return tinyFetch<TinyProductFull>(accessToken, `/produtos/${id}`)
+}
+
+export async function fetchProductAnexos(accessToken: string, id: number): Promise<TinyAnexo[]> {
+  const anexos = await tinyFetch<TinyAnexo[] | { itens?: TinyAnexo[] }>(accessToken, `/produtos/${id}/anexos`)
+  if (Array.isArray(anexos)) return anexos
+  return anexos?.itens ?? []
+}
+
+export async function updateProductFull(accessToken: string, id: number, body: Record<string, unknown>): Promise<void> {
+  await tinyFetch<void>(accessToken, `/produtos/${id}`, { method: "PUT", body })
+}
+
+export async function addProductAnexos(
+  accessToken: string,
+  id: number,
+  anexos: Array<{ url: string; externo: boolean }>,
+): Promise<TinyAnexo[]> {
+  const result = await tinyFetch<TinyAnexo[] | undefined>(accessToken, `/produtos/${id}/anexos`, {
+    method: "POST",
+    body: anexos,
+  })
+  return result ?? []
 }

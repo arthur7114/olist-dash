@@ -204,6 +204,9 @@ importers:
       tailwindcss:
         specifier: ^4.2.0
         version: 4.2.0
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
       tw-animate-css:
         specifier: 1.3.3
         version: 1.3.3
@@ -212,7 +215,7 @@ importers:
         version: 5.7.3
       vitest:
         specifier: ^4.1.9
-        version: 4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))
+        version: 4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))
 
   apps/extension:
     dependencies:
@@ -240,7 +243,7 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: 6.0.5
-        version: 6.0.5(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))
+        version: 6.0.5(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))
       jsdom:
         specifier: 30.0.1
         version: 30.0.1
@@ -249,10 +252,10 @@ importers:
         version: 5.7.3
       vite:
         specifier: 8.1.3
-        version: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+        version: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
       vitest:
         specifier: 4.1.9
-        version: 4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))
+        version: 4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))
 
   packages/contracts:
     dependencies:
@@ -445,11 +448,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -4235,6 +4238,11 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
+  tsx@4.23.13:
+    resolution: {integrity: sha512-BL5MGkRln6aDYhb0xbQlEAGw743BaZYWdbWtdJOBriYJboKgUUYCadFp2/FpBBZquBC/ezNBn7wMMPx7FDZUDw==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
   tw-animate-css@1.3.3:
     resolution: {integrity: sha512-tXE2TRWrskc4TU3RDd7T8n8Np/wCfoeH9gz22c7PzYqNPQ9FBGFbWWzwL0JyHcFp+jHozmF76tbHfPAx22ua2Q==}
 
@@ -6375,10 +6383,10 @@ snapshots:
       next: 16.2.6(@babel/core@7.29.7)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react: 19.2.4
 
-  '@vitejs/plugin-react@6.0.5(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))':
+  '@vitejs/plugin-react@6.0.5(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
 
   '@vitest/expect@4.1.9':
     dependencies:
@@ -6389,21 +6397,21 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.9(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))':
+  '@vitest/mocker@4.1.9(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))':
     dependencies:
       '@vitest/spy': 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
 
-  '@vitest/mocker@4.1.9(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))':
+  '@vitest/mocker@4.1.9(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))':
     dependencies:
       '@vitest/spy': 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+      vite: 8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
 
   '@vitest/pretty-format@4.1.9':
     dependencies:
@@ -8350,6 +8358,12 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
+  tsx@4.23.13:
+    dependencies:
+      esbuild: 0.28.0
+    optionalDependencies:
+      fsevents: 2.3.3
+
   tw-animate-css@1.3.3: {}
 
   type-check@0.4.0:
@@ -8495,7 +8509,7 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3):
+  vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -8507,9 +8521,9 @@ snapshots:
       esbuild: 0.28.0
       fsevents: 2.3.3
       jiti: 2.6.1
-      tsx: 4.22.3
+      tsx: 4.23.13
 
-  vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3):
+  vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -8521,12 +8535,12 @@ snapshots:
       esbuild: 0.28.0
       fsevents: 2.3.3
       jiti: 2.6.1
-      tsx: 4.22.3
+      tsx: 4.23.13
 
-  vitest@4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)):
+  vitest@4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)):
     dependencies:
       '@vitest/expect': 4.1.9
-      '@vitest/mocker': 4.1.9(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))
+      '@vitest/mocker': 4.1.9(vite@8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))
       '@vitest/pretty-format': 4.1.9
       '@vitest/runner': 4.1.9
       '@vitest/snapshot': 4.1.9
@@ -8543,7 +8557,7 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+      vite: 8.1.3(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.19.11
@@ -8551,10 +8565,10 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)):
+  vitest@4.1.9(@types/node@22.19.11)(jsdom@30.0.1)(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)):
     dependencies:
       '@vitest/expect': 4.1.9
-      '@vitest/mocker': 4.1.9(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3))
+      '@vitest/mocker': 4.1.9(vite@8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13))
       '@vitest/pretty-format': 4.1.9
       '@vitest/runner': 4.1.9
       '@vitest/snapshot': 4.1.9
@@ -8571,7 +8585,7 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.22.3)
+      vite: 8.2.0(@types/node@22.19.11)(esbuild@0.28.0)(jiti@2.6.1)(tsx@4.23.13)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.19.11
