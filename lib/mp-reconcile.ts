@@ -23,11 +23,10 @@ import {
   fetchReceivablesByNota,
   lancarContasNota,
   NOTA_SITUACOES_AUTORIZADAS,
-  refreshAccessToken,
   toNumber,
   type TinyReceivable,
 } from "@/lib/olist-v3"
-import { getStoredCredentials, saveCredentials } from "@/lib/db/credentials"
+import { getOlistAccessToken } from "@/lib/olist-token"
 import { claimContasLancadas, getMpReleaseCandidates, getMpReleaseStats, upsertMpRelease } from "@/lib/db/mpReleases"
 
 const BUDGET_MS = Number(process.env.MP_RECONCILE_BUDGET_MS) || 230_000
@@ -385,19 +384,6 @@ export async function runMpReconcile(
     stats: await getMpReleaseStats(sinceDate),
     elapsedMs: Date.now() - startedAt,
   }
-}
-
-// Usa o access token armazenado enquanto válido; só faz refresh (com rotação)
-// quando expirou — evita corrida de rotação com o sync que roda a cada 4h.
-async function getOlistAccessToken(): Promise<string> {
-  const creds = await getStoredCredentials()
-  if (!creds) throw new Error("Sem credenciais Olist no banco. Conecte a conta pelo dashboard primeiro.")
-  if (creds.accessToken && creds.accessExpiresAt && creds.accessExpiresAt.getTime() > Date.now() + 120_000) {
-    return creds.accessToken
-  }
-  const refreshed = await refreshAccessToken(creds.refreshToken)
-  await saveCredentials(refreshed)
-  return refreshed.access_token
 }
 
 export function indexReceivablesByOc(receivables: TinyReceivable[]): Map<string, TinyReceivable[]> {

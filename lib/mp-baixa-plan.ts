@@ -43,6 +43,58 @@ export function planBaixa(release: MlOrderRelease, contas: TinyReceivable[]): Ba
     }
   }
 
+  const resolved = resolveOpenReceivable(contas)
+  if (resolved.action !== "open") return resolved
+  const conta = resolved.conta
+
+  const valorCents = toCents(toNumber(conta.valor))
+  const saldoCents = toCents(toNumber(conta.saldo))
+  const grossCents = toCents(release.amount)
+  const netCents = toCents(release.netAmount)
+  const feeCents = toCents(release.feeAmount)
+
+  if (Math.abs(grossCents - valorCents) > TOLERANCE_CENTS) {
+    return {
+      action: "divergence",
+      reason: "gross_mismatch",
+      detail: `bruto MP ${release.amount.toFixed(2)} != valor da conta ${toNumber(conta.valor).toFixed(2)}`,
+    }
+  }
+
+  if (Math.abs(saldoCents - valorCents) > TOLERANCE_CENTS) {
+    return {
+      action: "divergence",
+      reason: "partial_balance",
+      detail: `conta ${conta.id} com saldo ${toNumber(conta.saldo).toFixed(2)} != valor ${toNumber(conta.valor).toFixed(2)} — baixa parcial anterior, resolver manualmente`,
+    }
+  }
+
+  if (netCents <= 0 || feeCents < 0 || Math.abs(netCents + feeCents - grossCents) > TOLERANCE_CENTS) {
+    return {
+      action: "divergence",
+      reason: "invalid_net",
+      detail: `equação não fecha: bruto ${release.amount.toFixed(2)} − tarifa ${release.feeAmount.toFixed(2)} != líquido ${release.netAmount.toFixed(2)}`,
+    }
+  }
+
+  return {
+    action: "baixa",
+    receivableId: conta.id,
+    valorPago: release.netAmount,
+    taxa: release.feeAmount,
+  }
+}
+
+// Regras de conta a receber comuns a toda conciliação de marketplace: exatamente UMA
+// conta do pedido, aberta e com id. Qualquer outra combinação é já-pago, não achado
+// ou divergência para resolver à mão.
+export type OpenReceivable =
+  | { action: "open"; conta: TinyReceivable & { id: number } }
+  | { action: "already_paid"; receivableId: number | null }
+  | { action: "receivable_not_found" }
+  | { action: "divergence"; reason: DivergenceReason; detail: string }
+
+export function resolveOpenReceivable(contas: TinyReceivable[]): OpenReceivable {
   const abertas = contas.filter(isReceivableOpen)
   const pagas = contas.filter((c) => c.situacao === "pago")
 
@@ -86,41 +138,6 @@ export function planBaixa(release: MlOrderRelease, contas: TinyReceivable[]): Ba
   if (!conta.id) {
     return { action: "divergence", reason: "invalid_receivable", detail: "conta aberta sem id" }
   }
+  return { action: "open", conta: conta as TinyReceivable & { id: number } }
 
-  const valorCents = toCents(toNumber(conta.valor))
-  const saldoCents = toCents(toNumber(conta.saldo))
-  const grossCents = toCents(release.amount)
-  const netCents = toCents(release.netAmount)
-  const feeCents = toCents(release.feeAmount)
-
-  if (Math.abs(grossCents - valorCents) > TOLERANCE_CENTS) {
-    return {
-      action: "divergence",
-      reason: "gross_mismatch",
-      detail: `bruto MP ${release.amount.toFixed(2)} != valor da conta ${toNumber(conta.valor).toFixed(2)}`,
-    }
-  }
-
-  if (Math.abs(saldoCents - valorCents) > TOLERANCE_CENTS) {
-    return {
-      action: "divergence",
-      reason: "partial_balance",
-      detail: `conta ${conta.id} com saldo ${toNumber(conta.saldo).toFixed(2)} != valor ${toNumber(conta.valor).toFixed(2)} — baixa parcial anterior, resolver manualmente`,
-    }
-  }
-
-  if (netCents <= 0 || feeCents < 0 || Math.abs(netCents + feeCents - grossCents) > TOLERANCE_CENTS) {
-    return {
-      action: "divergence",
-      reason: "invalid_net",
-      detail: `equação não fecha: bruto ${release.amount.toFixed(2)} − tarifa ${release.feeAmount.toFixed(2)} != líquido ${release.netAmount.toFixed(2)}`,
-    }
-  }
-
-  return {
-    action: "baixa",
-    receivableId: conta.id,
-    valorPago: release.netAmount,
-    taxa: release.feeAmount,
-  }
 }
