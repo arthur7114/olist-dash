@@ -15,7 +15,7 @@ na dúvida.
 
 | O quê | Onde | Por quê |
 |---|---|---|
-| App na Shopee Open Platform + autorizar a loja oem_parts | open.shopee.com, depois `/api/shopee/auth/start` | Sem app não há API |
+| App na Shopee Open Platform + autorizar a loja oem_parts | open.shopee.com, depois `/api/shopee/auth/start?key=<OLIST_SYNC_SECRET>` | Sem app não há API; o segredo impede que outra loja seja conectada |
 | Conta financeira "Shopee" | Olist, Finanças | API v3 só lista contas |
 | Categoria "Transferência entre contas" (fora da DRE) | Olist, Categorias | API v3 só lista categorias |
 | Permissão de Caixa no app da Olist + reconectar | Olist, Aplicativos | `GET/POST /caixa` hoje responde 403 |
@@ -36,7 +36,8 @@ env (`OLIST_SHOPEE_CONTA_ID`, `OLIST_SHOPEE_BANCO_CONTA_ID`, `OLIST_SHOPEE_VENDA
 - `GET /api/v2/payment/get_wallet_transaction_list`: janela máxima de 15 dias, `page_size` ≤ 100,
   `more` indica próxima página. Tipos usados: `ESCROW_VERIFIED_ADD` (101, renda do pedido),
   `WITHDRAWAL_CREATED` (201), `WITHDRAWAL_COMPLETED` (202), `WITHDRAWAL_CANCELLED` (203).
-  Só transações `status = COMPLETED`.
+  Só transações `status = COMPLETED`. Janelas sem sobreposição e transação repetida contada
+  uma vez só (a mesma transação pode vir na borda de duas janelas).
 - `GET /api/v2/payment/get_escrow_detail?order_sn=`: `order_income` com `escrow_amount`,
   `escrow_amount_after_adjustment`, `commission_fee`, `service_fee`, `seller_transaction_fee`,
   `order_ams_commission_fee`, `seller_return_refund`, `drc_adjustable_refund`,

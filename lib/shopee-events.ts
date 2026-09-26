@@ -30,7 +30,12 @@ export function toWalletEvents(txns: ShopeeWalletTxn[]): WalletEvent[] {
   const saques = new Map<number, ShopeeWalletTxn[]>()
   const outros: WalletEvent[] = []
 
+  // A mesma transação pode vir em duas janelas de consulta (borda): conta uma vez só.
+  const vistos = new Set<string>()
   for (const t of txns) {
+    const id = [t.transaction_type, t.create_time, t.amount, t.order_sn, t.withdrawal_id, t.refund_sn, t.status].join("|")
+    if (vistos.has(id)) continue
+    vistos.add(id)
     const type = t.transaction_type ?? ""
     if (type === "ESCROW_VERIFIED_ADD" && t.order_sn) {
       if (t.status !== "COMPLETED") continue

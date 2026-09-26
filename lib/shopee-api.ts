@@ -161,7 +161,8 @@ export async function fetchEscrowDetail(auth: ShopeeAuth, orderSn: string): Prom
 // Lançamentos da carteira entre dois instantes (segundos Unix), em janelas de 15 dias.
 export async function fetchWalletTransactions(auth: ShopeeAuth, fromSec: number, toSec: number): Promise<ShopeeWalletTxn[]> {
   const out: ShopeeWalletTxn[] = []
-  for (let start = fromSec; start < toSec; start += MAX_WINDOW_SEC) {
+  // Janelas sem sobreposição: [start, end], a próxima começa em end + 1.
+  for (let start = fromSec; start <= toSec; start += MAX_WINDOW_SEC + 1) {
     const end = Math.min(start + MAX_WINDOW_SEC, toSec)
     for (let page = 0; ; page++) {
       const body = await shopGet<{ response?: { transaction_list?: ShopeeWalletTxn[]; more?: boolean } }>(

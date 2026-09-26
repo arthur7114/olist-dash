@@ -89,7 +89,7 @@ describe("carteira Shopee", () => {
     const txns = await fetchWalletTransactions({ accessToken: "t", shopId: 1 }, 0, 20 * day)
 
     const windows = [...new Set(calls.map((u) => `${u.searchParams.get("create_time_from")}-${u.searchParams.get("create_time_to")}`))]
-    expect(windows).toEqual([`0-${15 * day}`, `${15 * day}-${20 * day}`])
+    expect(windows).toEqual([`0-${15 * day}`, `${15 * day + 1}-${20 * day}`])
     expect(calls.every((u) => u.searchParams.get("page_size") === "100")).toBe(true)
     expect(txns).toHaveLength(4)
   })

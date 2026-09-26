@@ -13,6 +13,11 @@ describe("toWalletEvents", () => {
     expect(e.txnTime.getTime()).toBe(T * 1000)
   })
 
+  it("a mesma transação repetida (borda de janela) conta uma vez", () => {
+    const t: ShopeeWalletTxn = { transaction_type: "ESCROW_VERIFIED_ADD", status: "COMPLETED", amount: 30.5, create_time: T, order_sn: "A1" }
+    expect(toWalletEvents([t, { ...t }])[0].amount).toBe(30.5)
+  })
+
   it("renda ainda não concluída não vira evento", () => {
     expect(toWalletEvents([{ transaction_type: "ESCROW_VERIFIED_ADD", status: "PENDING", amount: 1, create_time: T, order_sn: "A1" }])).toEqual([])
   })
