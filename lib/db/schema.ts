@@ -263,3 +263,44 @@ export const mlCommercialSyncState = pgTable("ml_commercial_sync_state", {
   itemsSynced: integer("items_synced").notNull().default(0),
   promotionsSynced: integer("promotions_synced").notNull().default(0),
 })
+
+// Conexão com a loja Shopee (linha única). Tokens cifrados com encryptSecret; o refresh
+// token é de uso único e rotaciona a cada renovação.
+export const shopeeCredentials = pgTable("shopee_credentials", {
+  id: integer("id").primaryKey().default(1),
+  shopId: text("shop_id").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  accessToken: text("access_token"),
+  accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Eventos da carteira Shopee já vistos pela conciliação (lib/shopee-reconcile.ts).
+// key: income:<order_sn> | withdrawal:<withdrawal_id> | other:<tipo>:<...>.
+export const shopeeWalletEvents = pgTable(
+  "shopee_wallet_events",
+  {
+    key: text("key").primaryKey(),
+    kind: text("kind").notNull(), // income | withdrawal | other
+    transactionType: text("transaction_type").notNull(),
+    orderSn: text("order_sn"),
+    withdrawalId: text("withdrawal_id"),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    fee: numeric("fee", { precision: 14, scale: 2 }).notNull().default("0"),
+    txnTime: timestamp("txn_time", { withTimezone: true }).notNull(),
+    walletState: text("wallet_state").notNull(), // ready | waiting | cancelled | ignored
+    // pending | done | already_paid | receivable_not_found | divergence | error | ignored
+    status: text("status").notNull().default("pending"),
+    receivableId: integer("receivable_id"),
+    caixaSaidaId: integer("caixa_saida_id"),
+    caixaEntradaId: integer("caixa_entrada_id"),
+    detail: jsonb("detail"),
+    raw: jsonb("raw"),
+    lastError: text("last_error"),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("shopee_wallet_events_status_idx").on(t.status, t.kind),
+  }),
+)
