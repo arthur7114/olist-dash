@@ -7,7 +7,9 @@ import {
   PEDIDOS,
   PRODUTOS,
   VENDEDORES_POR_CANAL,
+  BASE_VALOR_PADRAO,
   aplicarBaseValor,
+  normalizarBaseValor,
   type BaseValor,
   type Canal,
   type FormaPagamento,
@@ -61,6 +63,8 @@ const padrao: FiltrosState = {
   formaPagamento: "todos",
 }
 
+const CHAVE_BASE_VALOR = "baseValor.v2"
+
 const FiltrosContext = createContext<FiltrosContextValue | null>(null)
 
 export function FiltrosProvider({ children }: { children: ReactNode }) {
@@ -71,17 +75,19 @@ export function FiltrosProvider({ children }: { children: ReactNode }) {
   const [autenticado, setAutenticado] = useState(false)
   const [mensagemDados, setMensagemDados] = useState<string>()
   const [lastSync, setLastSync] = useState<string | null>(null)
-  const [baseValor, setBaseValorState] = useState<BaseValor>("venda")
+  const [baseValor, setBaseValorState] = useState<BaseValor>(BASE_VALOR_PADRAO)
 
   // Restaura a base escolhida ao montar (persistida entre sessões).
+  // A chave tem versão: quando o padrão virou NF (set/2026), a escolha antiga de "venda"
+  // salva no navegador não pode esconder a mudança. Quem trocar de novo, fica salvo.
   useEffect(() => {
-    const salvo = window.localStorage.getItem("baseValor")
-    if (salvo === "nota" || salvo === "venda") setBaseValorState(salvo)
+    const salvo = window.localStorage.getItem(CHAVE_BASE_VALOR)
+    if (salvo) setBaseValorState(normalizarBaseValor(salvo))
   }, [])
 
   const setBaseValor = (base: BaseValor) => {
     setBaseValorState(base)
-    window.localStorage.setItem("baseValor", base)
+    window.localStorage.setItem(CHAVE_BASE_VALOR, base)
   }
 
   // Período customizado ainda sem as duas datas escolhidas: não busca (evita

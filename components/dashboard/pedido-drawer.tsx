@@ -11,6 +11,7 @@ import {
   formatData,
   formatNumero,
   lucroBrutoPedido,
+  pedidoCancelado,
   taxaComissaoEfetiva,
   type Pedido,
 } from "@/lib/data"
@@ -27,12 +28,15 @@ export function PedidoDrawer({
   if (!pedido) return null
 
   const taxa = taxaComissaoEfetiva(pedido)
+  // Cancelado: a peça volta ao estoque e tarifa/frete são estornados, então nada disso é custo.
+  const cancelado = pedidoCancelado(pedido)
+  const estorno = cancelado ? " (estornado)" : ""
   const composicao = [
     { rotulo: "Valor da venda", valor: pedido.valorVenda },
     { rotulo: "(−) Devolução", valor: -pedido.devolucao },
-    { rotulo: "(−) Custo do produto", valor: -pedido.custoTotal },
-    { rotulo: `(−) Taxa marketplace${pedido.custoMlReal ? " (real ML)" : " (estimada)"}`, valor: -taxa },
-    { rotulo: `(−) Frete${pedido.custoMlReal ? " (real ML)" : ""}`, valor: -pedido.valorFrete },
+    { rotulo: `(−) Custo do produto${estorno}`, valor: cancelado ? 0 : -pedido.custoTotal },
+    { rotulo: `(−) Taxa marketplace${pedido.custoMlReal ? " (real ML)" : " (estimada)"}${estorno}`, valor: cancelado ? 0 : -taxa },
+    { rotulo: `(−) Frete${pedido.custoMlReal ? " (real ML)" : ""}${estorno}`, valor: cancelado ? 0 : -pedido.valorFrete },
     { rotulo: "= Margem de contribuição", valor: lucroBrutoPedido(pedido) },
   ]
 

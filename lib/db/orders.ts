@@ -147,7 +147,7 @@ export async function getBackfillSkipIds(
   return new Set(rows.map((r) => r.id))
 }
 
-function rowToPedido(
+export function rowToPedido(
   r: typeof orders.$inferSelect,
   mlSaleFee?: string | null,
   mlShipping?: string | null,
@@ -175,6 +175,7 @@ function rowToPedido(
     statusPagamento: statusPorSituacao(r.situacao, r.statusPagamento as StatusPagamento),
     data: r.data,
     custoMlReal,
+    situacao: r.situacao,
   }
 }
 

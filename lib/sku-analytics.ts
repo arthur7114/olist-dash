@@ -1,4 +1,4 @@
-import { taxaComissaoEfetiva, type ItemPedido, type Pedido } from "@/lib/data"
+import { pedidoCancelado, taxaComissaoEfetiva, type ItemPedido, type Pedido } from "@/lib/data"
 
 // Análise por SKU: cada pedido é rateado entre seus itens proporcionalmente ao
 // valor (taxa, frete e devolução seguem a participação do item no pedido).
@@ -49,6 +49,7 @@ export function agregarPorSku(pedidos: Pedido[]): LinhaSku[] {
     const totalPedido = itens.reduce((s, i) => s + i.valorUnitario * i.quantidade, 0)
     const taxa = taxaComissaoEfetiva(p)
     const devolvido = p.devolucao > 0
+    const cancelado = pedidoCancelado(p)
 
     for (const item of itens) {
       const valorItem = item.valorUnitario * item.quantidade
@@ -73,7 +74,8 @@ export function agregarPorSku(pedidos: Pedido[]): LinhaSku[] {
       acc.custoTotal += custoItem
       acc.taxaAlocada += taxa * share
       acc.freteAlocado += p.valorFrete * share
-      acc.margemValor += valorItem - devolucaoItem - custoItem - taxa * share - p.valorFrete * share
+      // Cancelado não gera margem (ver pedidoCancelado): a peça volta e tarifa/frete são estornados.
+      if (!cancelado) acc.margemValor += valorItem - devolucaoItem - custoItem - taxa * share - p.valorFrete * share
       if (valorItem > 0 && custoItem === 0) acc.temVendaSemCusto = true
       mapa.set(item.sku, acc)
     }
@@ -176,7 +178,7 @@ export function skuPorMes(sku: string, pedidos: Pedido[]): SkuMensal[] {
       acc.faturamento += valorItem
       acc.devolucao += devolucaoItem
       acc.quantidade += item.quantidade
-      acc.margem += valorItem - devolucaoItem - item.custoUnitario * item.quantidade - taxa * share - p.valorFrete * share
+      if (!pedidoCancelado(p)) acc.margem += valorItem - devolucaoItem - item.custoUnitario * item.quantidade - taxa * share - p.valorFrete * share
     }
     linhasPorMes.set(mes, acc)
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { PEDIDOS } from "@/lib/data"
+import { PEDIDOS, excluirMovimentacaoEstoque, normalizarBaseValor } from "@/lib/data"
 import { hasDatabase } from "@/lib/db/client"
 import { getOrdersByPeriod } from "@/lib/db/orders"
 import { getItemsByOrderIds } from "@/lib/db/orderItems"
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const periodo = normalizarPeriodo(url.searchParams.get("periodo"))
   const de = url.searchParams.get("de")
   const ate = url.searchParams.get("ate")
-  const baseValor = url.searchParams.get("base") === "nota" ? "nota" : "venda"
+  const baseValor = normalizarBaseValor(url.searchParams.get("base"))
 
   if (!hasDatabase()) {
     return NextResponse.json({
@@ -29,7 +29,9 @@ export async function GET(request: Request) {
   try {
     const range = periodo === "custom" && de && ate ? rangePersonalizado(de, ate) : rangePeriodo(periodo, new Date())
     const dataInicial = range.inicioAnterior ?? range.inicio ?? "1970-01-01"
-    const [pedidos, state] = await Promise.all([getOrdersByPeriod(dataInicial, baseValor), getSyncState()])
+    const [todos, state] = await Promise.all([getOrdersByPeriod(dataInicial, baseValor), getSyncState()])
+    // Movimentação de estoque lançada como pedido não é venda: sai de todas as telas.
+    const pedidos = excluirMovimentacaoEstoque(todos)
     const itensPorPedido = await getItemsByOrderIds(pedidos.map((p) => p.id))
     const pedidosComItens = pedidos.map((p) => ({ ...p, itens: itensPorPedido.get(p.id) ?? [] }))
 

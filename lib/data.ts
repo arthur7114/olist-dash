@@ -49,6 +49,7 @@ export interface Pedido {
   data: string // ISO date
   itens?: ItemPedido[]
   custoMlReal?: boolean // taxa/frete vieram da API do Mercado Livre (Task 15)
+  situacao?: number | null // situação do pedido na Olist (0 aberto, 2 cancelado…); ausente em dado mock
 }
 
 // ----------------------------------------------------------------------------
@@ -215,10 +216,34 @@ export function taxaComissaoEfetiva(p: Pedido): number {
   return p.taxaComissao > 0 ? p.taxaComissao : comissaoEstimada(p)
 }
 
+// Pedido cancelado não gera margem: a receita volta inteira (devolução), a peça volta ao
+// estoque e o marketplace estorna tarifa e frete. Descontar custo, frete e tarifa dele
+// criava um prejuízo que não existe (R$ 20 mil só em jun/2026).
+export function pedidoCancelado(p: Pedido): boolean {
+  return p.situacao === SITUACAO_CANCELADO
+}
+
+// Pedido que é movimentação de estoque, não venda: a Olist registra transferências como
+// pedido da venda direta em aberto a preço simbólico (até R$ 1 por unidade) mas com o
+// custo cheio. O pedido 3570 (906 un a R$ 1) sozinho tirava R$ 24 mil da MC de ago/2026.
+// Marketplace nunca entra aqui: lá preço baixo é venda de verdade.
+export function pedidoMovimentacaoEstoque(p: Pedido): boolean {
+  if (p.situacao !== SITUACAO_EM_ABERTO) return false
+  const canal = p.canal.toLowerCase()
+  if (isCanalMercadoLivre(p.canal) || canal.includes("shopee")) return false
+  const quantidade = p.quantidade > 0 ? p.quantidade : 1
+  return p.valorVenda / quantidade <= 1
+}
+
+export function excluirMovimentacaoEstoque(pedidos: Pedido[]): Pedido[] {
+  return pedidos.filter((p) => !pedidoMovimentacaoEstoque(p))
+}
+
 // Margem de contribuição do pedido (R$): receita − custos/despesas variáveis
-// (CMV + frete + devolução + comissão/taxa de marketplace).
+// (CMV + frete + devolução + comissão/taxa de marketplace). Cancelado = 0.
 // NB: o nome `lucroBruto` é mantido internamente, mas conceitualmente isto é a M.C.
 export function lucroBrutoPedido(p: Pedido): number {
+  if (pedidoCancelado(p)) return 0
   return p.valorVenda - p.custoTotal - p.valorFrete - p.devolucao - taxaComissaoEfetiva(p)
 }
 
@@ -485,6 +510,7 @@ export const SITUACAO_LABEL: Record<number, string> = {
   8: "Dados incompletos",
 }
 
+export const SITUACAO_EM_ABERTO = 0
 export const SITUACAO_CANCELADO = 2
 export const SITUACAO_ENTREGUE = 6
 export const SITUACOES_PAGAS = new Set([1, 3, 4, 5, 6, 7])
@@ -499,8 +525,15 @@ export function statusPorSituacao(
   return "Pendente"
 }
 
-// Base de valor usada nos números do dashboard: valor de venda (padrão) ou valor da NF.
+// Base de valor usada nos números do dashboard: valor da NF (padrão) ou valor de venda.
+// NF é o padrão porque é o número fechado: pedido cancelado e movimentação de estoque
+// quase nunca têm nota, então já ficam de fora sem depender de filtro.
 export type BaseValor = "venda" | "nota"
+export const BASE_VALOR_PADRAO: BaseValor = "nota"
+
+export function normalizarBaseValor(valor: string | null | undefined): BaseValor {
+  return valor === "venda" || valor === "nota" ? valor : BASE_VALOR_PADRAO
+}
 
 // Troca a base monetária "na fonte": em modo "nota" o recorte é "só faturados" —
 // pedidos SEM NF são descartados por inteiro (não são venda realizada ainda) e os
