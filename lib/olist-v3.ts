@@ -121,10 +121,12 @@ export type TinyOrderDetail = TinyOrderListItem & {
 type TinyProductDetail = {
   id?: number
   sku?: string
+  tipo?: string | null // K = kit
   precos?: {
     precoCusto?: number
     precoCustoMedio?: number
   }
+  kit?: Array<{ produto?: { id?: number; sku?: string }; quantidade?: number }> | null
 }
 
 // Item da listagem de notas fiscais (v3), confirmado contra o swagger público
@@ -809,7 +811,7 @@ async function fetchProductCosts(
   await mapWithConcurrency(idsToFetch.slice(0, 120), 3, async (id) => {
     try {
       const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
-      setProductCost(lookup, { id, sku: product.sku, cost: getProductCost(product) })
+      setProductCost(lookup, { id, sku: product.sku, cost: await getOwnOrKitCost(accessToken, product) })
 
       if (DEEP_PRODUCT_COST && !lookup.byId.get(id)) {
         const history = await tinyFetch<TinyProductCostList>(accessToken, `/produtos/${id}/custos?limit=1`)
@@ -874,11 +876,12 @@ export async function fetchCostsBySku(
         return
       }
       let cost = getProductCost(product)
-      // O resumo da lista às vezes vem sem custo; o detalhe e o histórico têm.
-      if (!(cost > 0) && typeof product.id === "number") {
+      // O resumo da lista às vezes vem sem custo; o detalhe e o histórico têm. Kit sempre
+      // vai ao detalhe: é lá que vêm os componentes.
+      if ((!(cost > 0) || product.tipo === "K") && typeof product.id === "number") {
         const detail = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${product.id}`)
-        cost = getProductCost(detail)
-        if (!(cost > 0)) {
+        cost = await getOwnOrKitCost(accessToken, detail)
+        if (!(cost > 0) && !isKit(detail)) {
           const history = await tinyFetch<TinyProductCostList>(
             accessToken,
             `/produtos/${product.id}/custos?limit=1`,
@@ -918,6 +921,53 @@ function setProductCost(
   const sku = normalizeSku(product.sku)
   if (typeof product.id === "number") lookup.byId.set(product.id, cost)
   if (sku) lookup.bySku.set(sku, cost)
+}
+
+function isKit(product: TinyProductDetail | undefined) {
+  return product?.tipo === "K" && Boolean(product.kit?.length)
+}
+
+// Kit usa a soma dos componentes, que acompanha o custo médio de cada peça; o custo
+// digitado no cadastro do kit só vale quando a soma não fecha.
+async function getOwnOrKitCost(accessToken: string, product: TinyProductDetail): Promise<number> {
+  const kitCost = await resolveKitCost(accessToken, product)
+  return kitCost && kitCost > 0 ? kitCost : getProductCost(product)
+}
+
+// Kit na Olist não tem custo próprio no cadastro: o custo é a soma dos componentes
+// vezes a quantidade de cada um. Devolve undefined quando o produto não é kit e 0 quando
+// algum componente está sem custo (custo parcial passaria por margem que não existe).
+async function resolveKitCost(
+  accessToken: string,
+  product: TinyProductDetail,
+  depth = 0,
+): Promise<number | undefined> {
+  if (!isKit(product)) return undefined
+  let total = 0
+  for (const item of product.kit ?? []) {
+    const id = item.produto?.id
+    const quantidade = toNumber(item.quantidade)
+    if (typeof id !== "number" || !(quantidade > 0)) return 0
+    const cost = await fetchComponentCost(accessToken, id, depth)
+    if (!(cost > 0)) return 0
+    total += cost * quantidade
+  }
+  return Math.round(total * 100) / 100
+}
+
+async function fetchComponentCost(accessToken: string, id: number, depth: number): Promise<number> {
+  const cached = readCostCache(productCostById, id)
+  if (cached !== undefined && cached > 0) return cached
+  const product = await tinyFetch<TinyProductDetail>(accessToken, `/produtos/${id}`)
+  // Kit dentro de kit: um nível basta na prática e evita laço em cadastro circular.
+  const kitCost = depth < 1 ? await resolveKitCost(accessToken, product, depth + 1) : undefined
+  let cost = kitCost && kitCost > 0 ? kitCost : getProductCost(product)
+  if (!(cost > 0) && !isKit(product)) {
+    const history = await tinyFetch<TinyProductCostList>(accessToken, `/produtos/${id}/custos?limit=1`)
+    cost = getProductCostFromHistory(history)
+  }
+  writeCostCache(productCostById, id, cost)
+  return cost
 }
 
 function getProductCost(product: TinyProductDetail | undefined) {
