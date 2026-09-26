@@ -164,6 +164,18 @@ export const olistCredentials = pgTable("olist_credentials", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Token de usuário do Mercado Livre (escrita em promoções), 1 linha (id=1). Tokens cifrados.
+// Só o dash renova (lib/ml-user-token.ts): o refresh do ML é de uso único.
+export const mlUserCredentials = pgTable("ml_user_credentials", {
+  id: integer("id").primaryKey().default(1),
+  mlUserId: text("ml_user_id").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  accessToken: text("access_token").notNull(),
+  accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }).notNull(),
+  scope: text("scope"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
 // Catálogo comercial do Mercado Livre usado pela calculadora e pela extensão.
 export const mlItems = pgTable(
   "ml_items",
