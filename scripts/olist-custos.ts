@@ -138,9 +138,14 @@ async function cmdKits(args: Args) {
     if (!(soma > 0)) linhas.push({ ...base, resultado: "sem_soma", motivo: `componente sem custo: ${faltando.join(", ")}` })
     else if (!kitNeedsUpdate(antes, soma)) linhas.push({ ...base, resultado: "ja_certo", motivo: "" })
     else if (args.dryRun) linhas.push({ ...base, resultado: "dry_run", motivo: "" })
+    else if (!kit.sku?.trim()) linhas.push({ ...base, resultado: "erro", motivo: "kit sem SKU: a Olist recusa o PUT" })
     else {
-      await gravarCusto(at, kit, soma)
-      linhas.push({ ...base, resultado: "gravado", motivo: "" })
+      try {
+        await gravarCusto(at, kit, soma)
+        linhas.push({ ...base, resultado: "gravado", motivo: "" })
+      } catch (error) {
+        linhas.push({ ...base, resultado: "erro", motivo: error instanceof Error ? error.message.slice(0, 200) : String(error) })
+      }
     }
     const l = linhas[linhas.length - 1]
     if (l.resultado !== "ja_certo") console.log(`${l.resultado.toString().padEnd(9)} ${String(l.sku).padEnd(28)} ${antes} -> ${soma} ${l.motivo}`)
@@ -298,6 +303,7 @@ async function cmdImportar(args: Args) {
     }
     pedidos.push({ linha: n, id, sku, custo: parsed.custo })
   })
+  for (const l of linhas) console.log(`${"erro".padEnd(12)} linha ${l.linha} ${l.sku} ${l.motivo}`)
   if (!pedidos.length && !linhas.length) {
     console.log("Nenhuma linha com custo preenchido.")
     return
