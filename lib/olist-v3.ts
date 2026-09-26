@@ -1471,3 +1471,78 @@ export async function addProductAnexos(
   })
   return result ?? []
 }
+
+// ---------------------------------------------------------------------------
+// Caixa e cadastros financeiros (conciliação Shopee). A v3 não tem endpoint de
+// transferência entre contas: a transferência vira uma saída numa conta e uma
+// entrada na outra, com categoria de transferência. Exige a permissão de Caixa
+// no app da Olist (sem ela, 403).
+
+export type CaixaLancamento = {
+  data: Date
+  historico: string
+  valor: number
+  tipo: "D" | "C"
+  contaId: number
+  categoriaId: number
+}
+
+// Data do caixa em yyyy-mm-dd (diferente do /baixar), dia contábil de Fortaleza.
+export function formatDateIso(date: Date, timeZone = "America/Fortaleza"): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date)
+}
+
+export function buildCaixaBody(l: CaixaLancamento) {
+  return {
+    data: formatDateIso(l.data),
+    historico: l.historico,
+    valor: Math.round(l.valor * 100) / 100,
+    tipo: l.tipo,
+    conta: { id: l.contaId },
+    categoria: { id: l.categoriaId },
+  }
+}
+
+// Sem retry em 5xx (tinyFetch não repete mutação): repetir duplicaria o lançamento.
+export async function createCaixaLancamento(accessToken: string, l: CaixaLancamento): Promise<number | undefined> {
+  const res = await tinyFetch<{ id?: number } | undefined>(accessToken, "/caixa", { method: "POST", body: buildCaixaBody(l) })
+  return res?.id
+}
+
+export type CaixaListItem = { id?: number; historico?: string; data?: string; valor?: number; tipo?: string; conta?: { id?: number } }
+
+export async function findCaixaLancamentos(
+  accessToken: string,
+  filtro: { historico: string; contaId: number; dataInicial: string; dataFinal: string },
+): Promise<CaixaListItem[]> {
+  const params = new URLSearchParams({
+    historico: filtro.historico,
+    idContaFinanceira: String(filtro.contaId),
+    dataInicial: filtro.dataInicial,
+    dataFinal: filtro.dataFinal,
+    limit: "100",
+  })
+  const list = await tinyFetch<TinyListResponse<CaixaListItem>>(accessToken, `/caixa?${params.toString()}`)
+  return list.itens ?? []
+}
+
+export type NamedRef = { id: number; descricao: string }
+
+async function listAllNamed(accessToken: string, path: string): Promise<NamedRef[]> {
+  const out: NamedRef[] = []
+  for (let offset = 0; ; offset += 100) {
+    const sep = path.includes("?") ? "&" : "?"
+    const list = await tinyFetch<TinyListResponse<{ id?: number; descricao?: string }>>(accessToken, `${path}${sep}limit=100&offset=${offset}`)
+    for (const i of list.itens ?? []) if (typeof i.id === "number") out.push({ id: i.id, descricao: String(i.descricao ?? "") })
+    if ((list.itens ?? []).length < 100) break
+  }
+  return out
+}
+
+export function fetchContasFinanceiras(accessToken: string): Promise<NamedRef[]> {
+  return listAllNamed(accessToken, "/contas-financeiras")
+}
+
+export function fetchCategoriasReceitaDespesa(accessToken: string): Promise<NamedRef[]> {
+  return listAllNamed(accessToken, "/categorias-receita-despesa")
+}
