@@ -3,8 +3,27 @@
 // o refresh do ML é de uso único, então renovar em mais de um lugar derruba os outros.
 
 const ML_API_URL = "https://api.mercadolibre.com"
-const AUTORIZAR = "https://olist-dash.vercel.app/ml/authorize"
 export const ML_STATE_COOKIE = "ml_oauth_state"
+
+// Contas da loja no Mercado Livre. Cada uma autoriza o mesmo aplicativo e guarda o
+// próprio token numa linha de ml_user_credentials (rowId). "atual" é a linha 1 de sempre.
+export type MlConta = "atual" | "sp"
+
+export const ML_CONTAS: Record<MlConta, { rowId: number; sellerId: string; nome: string }> = {
+  atual: { rowId: 1, sellerId: process.env.ML_SELLER_ID ?? "587857974", nome: "OEMPARTSOFICIAL" },
+  sp: { rowId: 2, sellerId: process.env.ML_SP_SELLER_ID ?? "3794710843", nome: "OEM Parts SP" },
+}
+
+// Sem parâmetro é a conta atual (links antigos continuam valendo); valor desconhecido é null.
+export function parseMlConta(valor: string | null | undefined): MlConta | null {
+  if (valor == null || valor === "" || valor === "atual") return "atual"
+  return valor === "sp" ? "sp" : null
+}
+
+export function mlAutorizarUrl(conta: MlConta = "atual"): string {
+  const base = "https://olist-dash.vercel.app/ml/authorize"
+  return conta === "atual" ? base : `${base}?conta=${conta}`
+}
 
 export type MlUserCredentials = {
   userId: string
@@ -33,6 +52,7 @@ type TokenResponse = {
 
 type Deps = {
   store: MlCredentialStore
+  conta?: MlConta
   fetchFn?: typeof fetch
   env?: MlOAuthEnv
   now?: () => Date
@@ -62,7 +82,7 @@ function toCredentials(data: TokenResponse, now: Date, fallbackRefresh?: string)
 export async function completeMlAuthorization(
   input: Deps & { code: string; redirectUri: string },
 ): Promise<{ userId: string }> {
-  const { code, redirectUri, store, fetchFn = fetch, env = mlOAuthEnv(), now = () => new Date() } = input
+  const { code, redirectUri, store, conta = "atual", fetchFn = fetch, env = mlOAuthEnv(conta), now = () => new Date() } = input
   const { status, data } = await postToken(
     { grant_type: "authorization_code", client_id: env.clientId, client_secret: env.clientSecret, code, redirect_uri: redirectUri },
     fetchFn,
@@ -72,7 +92,9 @@ export async function completeMlAuthorization(
   }
   const credentials = toCredentials(data, now())
   if (credentials.userId !== env.sellerId) {
-    throw new Error("Essa autorização foi feita com outra conta do Mercado Livre. Entre com a conta da loja e tente de novo.")
+    throw new Error(
+      `Essa autorização foi feita com outra conta do Mercado Livre. Saia, entre com a conta ${ML_CONTAS[conta].nome} e tente de novo.`,
+    )
   }
   await store.save(credentials)
   return { userId: credentials.userId }
@@ -82,10 +104,10 @@ export async function completeMlAuthorization(
 const MARGEM_MS = 5 * 60 * 1000
 
 export async function getMlUserAccessToken(input: Deps): Promise<string> {
-  const { store, fetchFn = fetch, env = mlOAuthEnv(), now = () => new Date() } = input
+  const { store, conta = "atual", fetchFn = fetch, env = mlOAuthEnv(conta), now = () => new Date() } = input
   const valido = (c: MlUserCredentials) => c.accessExpiresAt.getTime() > now().getTime() + MARGEM_MS
   const current = await store.load()
-  if (!current) throw new Error(`O Mercado Livre ainda não foi autorizado. Abra ${AUTORIZAR} e clique em Autorizar.`)
+  if (!current) throw new Error(`O Mercado Livre ainda não foi autorizado. Abra ${mlAutorizarUrl(conta)} e clique em Autorizar.`)
   if (valido(current)) return current.accessToken
 
   const { data } = await postToken(
@@ -96,7 +118,7 @@ export async function getMlUserAccessToken(input: Deps): Promise<string> {
     // Refresh é de uso único: se outra chamada renovou antes, o nosso já foi gasto e o dela está no banco.
     const latest = await store.load()
     if (latest && latest.refreshToken !== current.refreshToken && valido(latest)) return latest.accessToken
-    throw new Error(`A autorização do Mercado Livre expirou. Abra ${AUTORIZAR} e clique em Autorizar de novo.`)
+    throw new Error(`A autorização do Mercado Livre expirou. Abra ${mlAutorizarUrl(conta)} e clique em Autorizar de novo.`)
   }
   const renewed = toCredentials({ user_id: current.userId, ...data }, now(), current.refreshToken)
   await store.save(renewed)
@@ -118,10 +140,10 @@ export function mlAuthorizeUrl(state: string, env: Pick<MlOAuthEnv, "clientId"> 
   return url.toString()
 }
 
-export function mlOAuthEnv(): MlOAuthEnv {
+export function mlOAuthEnv(conta: MlConta = "atual"): MlOAuthEnv {
   const clientId = process.env.ML_CLIENT_ID
   const clientSecret = process.env.ML_CLIENT_SECRET
   if (!clientId || !clientSecret) throw new Error("ML_CLIENT_ID e ML_CLIENT_SECRET precisam estar configurados.")
-  // Conta OEMPARTSOFICIAL: só ela pode ser autorizada, já que /ml/authorize é público.
-  return { clientId, clientSecret, sellerId: process.env.ML_SELLER_ID ?? "587857974" }
+  // Só a conta cadastrada em ML_CONTAS pode ser autorizada, já que /ml/authorize é público.
+  return { clientId, clientSecret, sellerId: ML_CONTAS[conta].sellerId }
 }

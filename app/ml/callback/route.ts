@@ -1,6 +1,6 @@
 import { cookies } from "next/headers"
-import { mlCredentialStore } from "@/lib/db/mlUserCredentials"
-import { ML_STATE_COOKIE, completeMlAuthorization, mlRedirectUri } from "@/lib/ml-user-token"
+import { mlCredentialStoreFor } from "@/lib/db/mlUserCredentials"
+import { ML_CONTAS, ML_STATE_COOKIE, completeMlAuthorization, mlRedirectUri, parseMlConta } from "@/lib/ml-user-token"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -12,22 +12,25 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code")
   const erro = url.searchParams.get("error")
   const cookieStore = await cookies()
-  const expected = cookieStore.get(ML_STATE_COOKIE)?.value
+  // Cookie no formato "<conta>.<state>"; um cookie antigo, só com o state, vale para a conta atual.
+  const cookie = cookieStore.get(ML_STATE_COOKIE)?.value
+  const [contaBruta, expected] = cookie?.includes(".") ? cookie.split(".", 2) : [null, cookie]
+  const conta = parseMlConta(contaBruta)
 
   if (erro) return pagina(false, "A autorização foi cancelada na tela do Mercado Livre.")
   if (!code) return pagina(false, "O Mercado Livre não devolveu o código de autorização.")
-  if (!expected || url.searchParams.get("state") !== expected) {
+  if (!conta || !expected || url.searchParams.get("state") !== expected) {
     return pagina(false, "Esse link de retorno é de outra tentativa ou expirou. Comece de novo pelo botão Autorizar.")
   }
 
   try {
-    await completeMlAuthorization({ code, redirectUri: mlRedirectUri(), store: mlCredentialStore })
+    await completeMlAuthorization({ code, redirectUri: mlRedirectUri(), store: mlCredentialStoreFor(conta), conta })
   } catch (e) {
     console.error("Falha ao concluir autorização do Mercado Livre:", e)
     return pagina(false, e instanceof Error ? e.message : "Não foi possível concluir a autorização.")
   }
   cookieStore.delete(ML_STATE_COOKIE)
-  return pagina(true, "O painel já pode alterar promoções no Mercado Livre. A autorização se renova sozinha.")
+  return pagina(true, `A conta ${ML_CONTAS[conta].nome} está autorizada no painel. A autorização se renova sozinha.`)
 }
 
 function pagina(ok: boolean, texto: string): Response {

@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
-import { completeMlAuthorization, getMlUserAccessToken, type MlCredentialStore, type MlUserCredentials } from "@/lib/ml-user-token"
+import {
+  ML_CONTAS,
+  completeMlAuthorization,
+  getMlUserAccessToken,
+  mlAutorizarUrl,
+  parseMlConta,
+  type MlCredentialStore,
+  type MlUserCredentials,
+} from "@/lib/ml-user-token"
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
@@ -137,5 +145,69 @@ describe("getMlUserAccessToken", () => {
     await expect(getMlUserAccessToken({ store, fetchFn: fetchFn as unknown as typeof fetch, env, now: () => now })).rejects.toThrow(
       /ml\/authorize/,
     )
+  })
+})
+
+describe("duas contas", () => {
+  it("lê a conta do parâmetro: vazio é a atual, sp é sp, o resto é recusado", () => {
+    expect(parseMlConta(null)).toBe("atual")
+    expect(parseMlConta("")).toBe("atual")
+    expect(parseMlConta("atual")).toBe("atual")
+    expect(parseMlConta("sp")).toBe("sp")
+    expect(parseMlConta("rj")).toBeNull()
+  })
+
+  it("cada conta tem a própria linha e o próprio vendedor", () => {
+    expect(ML_CONTAS.atual.rowId).toBe(1)
+    expect(ML_CONTAS.sp.rowId).toBe(2)
+    expect(ML_CONTAS.sp.sellerId).not.toBe(ML_CONTAS.atual.sellerId)
+  })
+
+  it("o link de autorização da sp leva ?conta=sp e o da atual continua igual", () => {
+    expect(mlAutorizarUrl()).toBe("https://olist-dash.vercel.app/ml/authorize")
+    expect(mlAutorizarUrl("sp")).toBe("https://olist-dash.vercel.app/ml/authorize?conta=sp")
+  })
+
+  it("autorizar a sp com a conta atual é recusado e não grava", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ access_token: "APP_USR-a", refresh_token: "TG-r1", expires_in: 21600, user_id: 587857974 }),
+    )
+    const store = memoryStore()
+    await expect(
+      completeMlAuthorization({
+        code: "TG-code",
+        redirectUri: "https://olist-dash.vercel.app/ml/callback",
+        store,
+        conta: "sp",
+        fetchFn: fetchFn as unknown as typeof fetch,
+        env: { ...env, sellerId: "3794710843" },
+        now: () => now,
+      }),
+    ).rejects.toThrow(/OEM Parts SP/)
+    expect(store.current).toBeNull()
+  })
+
+  it("autoriza a sp quando o login é da conta sp", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ access_token: "APP_USR-sp", refresh_token: "TG-sp", expires_in: 21600, user_id: 3794710843 }),
+    )
+    const store = memoryStore()
+    const result = await completeMlAuthorization({
+      code: "TG-code",
+      redirectUri: "https://olist-dash.vercel.app/ml/callback",
+      store,
+      conta: "sp",
+      fetchFn: fetchFn as unknown as typeof fetch,
+      env: { ...env, sellerId: "3794710843" },
+      now: () => now,
+    })
+    expect(result).toEqual({ userId: "3794710843" })
+    expect(store.current?.accessToken).toBe("APP_USR-sp")
+  })
+
+  it("token ausente da sp aponta para o link da sp", async () => {
+    await expect(
+      getMlUserAccessToken({ store: memoryStore(), conta: "sp", fetchFn: vi.fn() as unknown as typeof fetch, env, now: () => now }),
+    ).rejects.toThrow(/conta=sp/)
   })
 })
