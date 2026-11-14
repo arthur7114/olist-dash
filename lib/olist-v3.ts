@@ -1,5 +1,6 @@
 import type { FormaPagamento, Pedido, StatusPagamento } from "@/lib/data"
 import { extractOrderItems, type SyncOrderItem } from "@/lib/olist-items"
+import { olistAppCredentials, type OlistConta } from "@/lib/olist-contas"
 
 export const OLIST_AUTH_URL =
   "https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth"
@@ -236,19 +237,12 @@ export function getRedirectUri(request: Request) {
   return `${getBaseUrl(request)}/callback`
 }
 
-export function getOAuthCredentials() {
-  const clientId = process.env.OLIST_CLIENT_ID
-  const clientSecret = process.env.OLIST_CLIENT_SECRET
-
-  if (!clientId || !clientSecret) {
-    throw new Error("OLIST_CLIENT_ID e OLIST_CLIENT_SECRET precisam estar configurados.")
-  }
-
-  return { clientId, clientSecret }
+export function getOAuthCredentials(conta: OlistConta = "atual") {
+  return olistAppCredentials(conta)
 }
 
-export function buildAuthorizationUrl(request: Request, state: string) {
-  const { clientId } = getOAuthCredentials()
+export function buildAuthorizationUrl(request: Request, state: string, conta: OlistConta = "atual") {
+  const { clientId } = getOAuthCredentials(conta)
   const url = new URL(OLIST_AUTH_URL)
   url.searchParams.set("client_id", clientId)
   url.searchParams.set("redirect_uri", getRedirectUri(request))
@@ -258,8 +252,8 @@ export function buildAuthorizationUrl(request: Request, state: string) {
   return url
 }
 
-export async function exchangeCodeForToken(request: Request, code: string) {
-  const { clientId, clientSecret } = getOAuthCredentials()
+export async function exchangeCodeForToken(request: Request, code: string, conta: OlistConta = "atual") {
+  const { clientId, clientSecret } = getOAuthCredentials(conta)
   return tokenRequest({
     grant_type: "authorization_code",
     client_id: clientId,
@@ -269,14 +263,19 @@ export async function exchangeCodeForToken(request: Request, code: string) {
   })
 }
 
-export async function refreshAccessToken(refreshToken: string) {
-  const { clientId, clientSecret } = getOAuthCredentials()
+export async function refreshAccessToken(refreshToken: string, conta: OlistConta = "atual") {
+  const { clientId, clientSecret } = getOAuthCredentials(conta)
   return tokenRequest({
     grant_type: "refresh_token",
     client_id: clientId,
     client_secret: clientSecret,
     refresh_token: refreshToken,
   })
+}
+
+// Dados da empresa dona do token (GET /info): usado para conferir o CNPJ no login.
+export async function fetchCompanyInfo(accessToken: string): Promise<{ razaoSocial?: string; cpfCnpj?: string; fantasia?: string }> {
+  return tinyFetch(accessToken, "/info")
 }
 
 async function tokenRequest(params: Record<string, string>) {
