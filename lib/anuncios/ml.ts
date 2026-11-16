@@ -43,9 +43,23 @@ function permissao(status: number, data: unknown): string | null {
   return null
 }
 
-export async function validarItem(token: string, item: ItemMl, fetchFn?: typeof fetch): Promise<{ ok: true } | { ok: false; erros: string[] }> {
+// O ML devolve 400 mesmo quando só há avisos (ex.: "User has not mode me1" em conta só com Mercado Envios 2).
+// Só avisos contam como válido; o primeiro erro de verdade reprova.
+export function soAvisos(data: unknown): boolean {
+  const causas = ((data ?? {}) as MlErro).cause ?? []
+  return causas.length > 0 && causas.every((c) => c.type === "warning")
+}
+
+export async function validarItem(
+  token: string,
+  item: ItemMl,
+  fetchFn?: typeof fetch,
+): Promise<{ ok: true; avisos: string[] } | { ok: false; erros: string[] }> {
   const r = await mlFetch(token, "POST", "/items/validate", item, fetchFn)
-  if (r.status === 204 || r.status === 200) return { ok: true }
+  if (r.status === 204 || r.status === 200) return { ok: true, avisos: [] }
+  if (r.status === 400 && soAvisos(r.data)) {
+    return { ok: true, avisos: (((r.data ?? {}) as MlErro).cause ?? []).map((c) => c.message ?? c.code ?? "") }
+  }
   const p = permissao(r.status, r.data)
   return { ok: false, erros: p ? [p] : errosDoMl(r.data) }
 }
