@@ -1,4 +1,4 @@
-import { pgTable, text, integer, numeric, date, timestamp, jsonb, index, primaryKey } from "drizzle-orm/pg-core"
+import { pgTable, text, integer, numeric, date, timestamp, jsonb, index, primaryKey, serial, uniqueIndex } from "drizzle-orm/pg-core"
 
 // Pedidos sincronizados da Olist. Espelha o tipo `Pedido` (lib/data.ts) + bookkeeping.
 export const orders = pgTable(
@@ -302,5 +302,31 @@ export const shopeeWalletEvents = pgTable(
   },
   (t) => ({
     statusIdx: index("shopee_wallet_events_status_idx").on(t.status, t.kind),
+  }),
+)
+
+// Rascunhos de anúncio do conector (claude.ai): um por SKU × formato × conta dentro de um lote.
+// status: rascunho → validado → publicado; bloqueado quando falta algo (ex.: SKU fora da Olist da conta); erro.
+export const anuncioRascunhos = pgTable(
+  "anuncio_rascunhos",
+  {
+    id: serial("id").primaryKey(),
+    lote: text("lote").notNull(),
+    familia: text("familia").notNull(),
+    sku: text("sku").notNull(),
+    formato: text("formato").notNull(),
+    conta: text("conta").notNull(),
+    status: text("status").notNull().default("rascunho"),
+    ficha: jsonb("ficha").notNull(),
+    item: jsonb("item"),
+    descricao: text("descricao"),
+    motivo: text("motivo"),
+    itemId: text("item_id"),
+    criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
+    atualizadoEm: timestamp("atualizado_em", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    unico: uniqueIndex("anuncio_rascunhos_unico").on(t.lote, t.sku, t.formato, t.conta),
+    loteIdx: index("anuncio_rascunhos_lote_idx").on(t.lote),
   }),
 )
