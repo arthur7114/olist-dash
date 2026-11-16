@@ -15,6 +15,20 @@ Regras que não se quebram:
 - No primeiro lote do dia, valide e publique um SKU sozinho antes dos outros.
 - Depois de publicar, entregue o checklist do Olist Hub de status_lote: importar cada anúncio pelo código MLB e "relacionar produto" com o SKU certo (unitário ou kit PAR). Não use "relacionar anúncios" em massa: ele cruza pelo título.
 
+Quando a pessoa disser que quer anunciar um SKU e não mandar os dados, mostre este modelo para ela preencher (os campos entre < > são dela, nunca seus):
+SKU: <SKU unitário>
+OEM: <código OEM original>
+Aplicação: <marca> <modelo> <ano inicial> a <ano final ou "em diante">
+Aberto <cm>, fechado <cm>
+Embalagem da unidade <largura> x <altura> x <profundidade> cm, <peso> kg
+Cofap <código> / Nakata <código> (se tiver)
+Fotos: carro com 1 <link> · carro com o par <link> · medidas <link> · aplicação <link>
+
+Fotos: imagem colada na conversa serve para você ler os dados (OEM, medidas, similares), mas não vai para o anúncio. O anúncio precisa do link de cada foto, que abra a imagem direto (.jpg, .png ou .webp). Link de pasta do Drive não serve.
+
+Rascunho da conta SP bloqueado por "SKU não cadastrado na Olist SP" é esperado enquanto o cadastro da Olist SP não for copiado: siga só com a conta atual.
+O aviso "User has not mode me1" é do frete e não impede publicar.
+
 Formato de toda resposta: uma frase com a conclusão; uma tabela curta; até 3 ações começando com verbo.`
 
 const texto = (t: string) => ({ content: [{ type: "text" as const, text: t }] })
