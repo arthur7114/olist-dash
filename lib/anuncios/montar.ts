@@ -169,7 +169,9 @@ export function montarItem(molde: Molde, formato: Formato, ficha: Ficha, olist: 
     ["SELLER_PACKAGE_WIDTH", cm(emb.larguraCm)],
     ["SELLER_PACKAGE_HEIGHT", cm(emb.alturaCm)],
     ["SELLER_PACKAGE_WEIGHT", `${Math.round(emb.pesoKg * 1000)} g`],
-    f.gtin === "olist" && olist.gtin ? ["GTIN", olist.gtin] : ["EMPTY_GTIN_REASON", "Outro motivo"],
+    f.gtin === "olist" && olist.gtin
+      ? ["GTIN", olist.gtin]
+      : ["EMPTY_GTIN_REASON", f.unidadesPorPack > 1 ? "O produto é um kit ou pack" : "O produto não tem código cadastrado"],
   ]
   return {
     family_name: titulo,

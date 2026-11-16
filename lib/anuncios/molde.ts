@@ -12,7 +12,7 @@ export type MoldeFormato = {
   preco: number
   skuSufixo: string
   unidadesPorPack: number
-  saleFormat: "Unidade" | "Kit"
+  saleFormat: "Unidade" | "Pack"
   tituloPrefixos: string[] // do mais completo ao mais curto, para caber em 60 caracteres
   descricaoPrefixo: string
   fotos: FotoSlot[]
@@ -79,7 +79,7 @@ export const MOLDE_AMORTECEDOR_TAMPA: Molde = {
       preco: 67.45,
       skuSufixo: " - PAR",
       unidadesPorPack: 2,
-      saleFormat: "Kit",
+      saleFormat: "Pack", // a categoria aceita Unidade ou Pack; "Kit" é recusado
       tituloPrefixos: ["Par Amortecedor Tampa Mala Traseira", "Par Amortecedor Tampa Traseira"],
       descricaoPrefixo: "PAR AMORTECEDOR PORTA MALA TRASEIRA",
       fotos: [

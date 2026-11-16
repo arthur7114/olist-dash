@@ -134,11 +134,11 @@ describe("montarItem", () => {
     expect(a.EMPTY_GTIN_REASON).toBeUndefined()
   })
 
-  it("par: kit, 2 unidades, sem GTIN, embalagem dobrada, preço do par", () => {
+  it("par: pack, 2 unidades, sem GTIN, embalagem dobrada, preço do par", () => {
     const item = montarItem(M, "par", kwid, { sku: "SW0856 - PAR", gtin: "", estoque: 50 }, "T")
     const a = Object.fromEntries(item.attributes.map((x) => [x.id, x.value_name]))
     expect(item.price).toBe(67.45)
-    expect(a).toMatchObject({ SALE_FORMAT: "Kit", UNITS_PER_PACK: "2", SELLER_SKU: "SW0856 - PAR", EMPTY_GTIN_REASON: "Outro motivo", SELLER_PACKAGE_WIDTH: "10 cm", SELLER_PACKAGE_WEIGHT: "344 g" })
+    expect(a).toMatchObject({ SALE_FORMAT: "Pack", UNITS_PER_PACK: "2", SELLER_SKU: "SW0856 - PAR", EMPTY_GTIN_REASON: "O produto é um kit ou pack", SELLER_PACKAGE_WIDTH: "10 cm", SELLER_PACKAGE_WEIGHT: "344 g" })
     expect(a.GTIN).toBeUndefined()
   })
 })
@@ -154,5 +154,14 @@ describe("compatibilidades", () => {
     const lotes = lotesDeCompatibilidade(fams)
     expect(lotes.every((l) => l.length <= 10 && l.reduce((s, f) => s + f.veiculos, 0) <= 200)).toBe(true)
     expect(lotes.flat()).toHaveLength(11)
+  })
+})
+
+describe("validação do ML", () => {
+  it("400 só com avisos conta como válido; com um erro, não", async () => {
+    const { soAvisos } = await import("@/lib/anuncios/ml")
+    expect(soAvisos({ cause: [{ type: "warning", message: "User has not mode me1" }] })).toBe(true)
+    expect(soAvisos({ cause: [{ type: "warning" }, { type: "error", message: "Attribute [SALE_FORMAT] is not valid" }] })).toBe(false)
+    expect(soAvisos({ message: "Validation error" })).toBe(false)
   })
 })
