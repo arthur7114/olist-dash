@@ -6,7 +6,7 @@ import { z } from "zod"
 import type { ItemMl } from "@/lib/anuncios/montar"
 import { ajustarRascunho, gerarRascunhos, lerRascunho, listarLote, MAX_POR_PUBLICACAO, prepararLote, publicar } from "@/lib/anuncios/servico"
 
-const INSTRUCOES = `Você cria anúncios novos de autopeças da OEM Parts no Mercado Livre, nas duas contas (atual e SP).
+const instrucoes = (paginaFotos?: string) => `Você cria anúncios novos de autopeças da OEM Parts no Mercado Livre, nas duas contas (atual e SP).
 Quem conversa com você NÃO é técnico: fale em português comum, nunca em token, API ou MCP.
 
 Regras que não se quebram:
@@ -24,7 +24,8 @@ Embalagem da unidade <largura> x <altura> x <profundidade> cm, <peso> kg
 Cofap <código> / Nakata <código> (se tiver)
 Fotos: carro com 1 <link> · carro com o par <link> · medidas <link> · aplicação <link>
 
-Fotos: imagem colada na conversa serve para você ler os dados (OEM, medidas, similares), mas não vai para o anúncio. O anúncio precisa do link de cada foto, que abra a imagem direto (.jpg, .png ou .webp). Link de pasta do Drive não serve.
+Fotos: imagem colada na conversa serve para você ler os dados (OEM, medidas, similares), mas não vai para o anúncio. O anúncio precisa do link de cada foto, que abra a imagem direto (.jpg, .png ou .webp). Link de pasta do Drive não serve.${paginaFotos ? `
+Se a pessoa não tiver os links (foto só no computador ou no celular), mande esta página para ela subir as 4 fotos: ${paginaFotos}?sku=<SKU>. A página devolve a linha "Fotos: …" pronta para colar de volta na conversa. Não mostre essa página fora da conversa com a equipe.` : ""}
 
 Rascunho da conta SP bloqueado por "SKU não cadastrado na Olist SP" é esperado enquanto o cadastro da Olist SP não for copiado: siga só com a conta atual.
 O aviso "User has not mode me1" é do frete e não impede publicar.
@@ -59,8 +60,8 @@ const fichaSchema = z.object({
     .describe("Links públicos das 4 fotos que trocam por SKU"),
 })
 
-export function criarServidorAnuncios(): McpServer {
-  const server = new McpServer({ name: "oem-anuncios", version: "1.0.0" }, { instructions: INSTRUCOES })
+export function criarServidorAnuncios(opcoes: { paginaFotos?: string } = {}): McpServer {
+  const server = new McpServer({ name: "oem-anuncios", version: "1.0.0" }, { instructions: instrucoes(opcoes.paginaFotos) })
 
   server.registerTool(
     "preparar_lote",
